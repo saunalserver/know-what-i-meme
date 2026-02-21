@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useGame } from '../context/GameContext'
+import CameraModal from '../components/CameraModal'
 
 function PlayerJoin() {
   const navigate = useNavigate()
@@ -9,6 +10,10 @@ function PlayerJoin() {
   const { joinRoom, player, gameState, error, clearError, isConnected } = useGame()
   const [code, setCode] = useState(urlCode || '')
   const [name, setName] = useState('')
+  const [photoUrl, setPhotoUrl] = useState('')
+  const [photoPreview, setPhotoPreview] = useState(null)
+  const [isJoining, setIsJoining] = useState(false)
+  const [showCamera, setShowCamera] = useState(false)
 
   // Pre-fill code from URL
   useEffect(() => {
@@ -17,19 +22,57 @@ function PlayerJoin() {
     }
   }, [urlCode])
 
+  // Update photo preview when URL changes
+  useEffect(() => {
+    if (photoUrl.trim()) {
+      // Validate it's a URL-like string
+      if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://') || photoUrl.startsWith('data:')) {
+        setPhotoPreview(photoUrl)
+      } else {
+        setPhotoPreview(null)
+      }
+    } else {
+      setPhotoPreview(null)
+    }
+  }, [photoUrl])
+
   // Navigate to game when joined
   useEffect(() => {
     if (player && gameState) {
+      setIsJoining(false)
       navigate(`/play/${gameState.code}`)
     }
   }, [player, gameState, navigate])
 
+  // Clear joining state on error
+  useEffect(() => {
+    if (error) {
+      setIsJoining(false)
+    }
+  }, [error])
+
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (code.length === 4 && name.trim()) {
-      joinRoom(code.toUpperCase(), name.trim(), null)
+    if (code.length === 4 && name.trim() && isConnected && !isJoining) {
+      setIsJoining(true)
+      // Use photoUrl which may contain a URL or a data URL from camera
+      const photo = photoUrl.trim() || null
+      joinRoom(code.toUpperCase(), name.trim(), photo)
     }
   }
+
+  const handleCameraCapture = (dataUrl) => {
+    setPhotoUrl(dataUrl)
+    setPhotoPreview(dataUrl)
+  }
+
+  const handleClearPhoto = () => {
+    setPhotoUrl('')
+    setPhotoPreview(null)
+  }
+
+  // Generate a random color for the preview avatar
+  const previewColor = '#7289da'
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-dark-primary via-dark-secondary to-dark-tertiary" style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
@@ -89,17 +132,78 @@ function PlayerJoin() {
             />
           </div>
 
+          {/* Profile Picture (optional) */}
+          <div>
+            <label className="block text-text-secondary mb-2 text-lg">
+              Profile Picture <span className="text-text-muted text-sm">(optional)</span>
+            </label>
+
+            {/* Avatar Preview with buttons */}
+            <div className="flex gap-3 items-start">
+              {/* Avatar Preview */}
+              <div className="relative">
+                <div
+                  className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold shrink-0 overflow-hidden border-2 border-dark-tertiary"
+                  style={{
+                    backgroundColor: previewColor,
+                    backgroundImage: photoPreview ? `url(${photoPreview})` : 'none',
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center'
+                  }}
+                >
+                  {!photoPreview && name.charAt(0).toUpperCase()}
+                </div>
+                {photoPreview && (
+                  <button
+                    type="button"
+                    onClick={handleClearPhoto}
+                    className="absolute -top-1 -right-1 w-6 h-6 bg-error rounded-full flex items-center justify-center text-xs"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Camera button only */}
+              <div className="flex-1">
+                <button
+                  type="button"
+                  onClick={() => setShowCamera(true)}
+                  className="w-full btn-secondary py-3 flex items-center justify-center gap-2"
+                >
+                  📷 Take Photo
+                </button>
+                <p className="text-text-muted text-xs mt-2 text-center">
+                  {photoPreview ? 'Photo captured! Tap X to remove.' : 'Tap to take a selfie'}
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Join Button */}
           <button
             type="submit"
-            disabled={code.length !== 4 || !name.trim() || !isConnected}
-            className={`btn-primary w-full text-xl py-4 ${
-              code.length !== 4 || !name.trim() || !isConnected
+            disabled={code.length !== 4 || !name.trim() || !isConnected || isJoining}
+            className={`btn-primary w-full text-xl py-4 flex items-center justify-center gap-2 ${
+              code.length !== 4 || !name.trim() || !isConnected || isJoining
                 ? 'opacity-50 cursor-not-allowed'
                 : ''
             }`}
           >
-            {isConnected ? 'Join Game' : 'Connecting...'}
+            {isJoining ? (
+              <>
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
+                />
+                Joining...
+              </>
+            ) : !isConnected ? (
+              'Connecting...'
+            ) : (
+              'Join Game'
+            )}
           </button>
         </form>
 
@@ -110,6 +214,13 @@ function PlayerJoin() {
           ← Back to Home
         </button>
       </motion.div>
+
+      {/* Camera Modal */}
+      <CameraModal
+        isOpen={showCamera}
+        onClose={() => setShowCamera(false)}
+        onCapture={handleCameraCapture}
+      />
     </div>
   )
 }

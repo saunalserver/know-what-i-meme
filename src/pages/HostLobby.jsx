@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import QRCode from 'qrcode'
 import { useGame } from '../context/GameContext'
+import Avatar from '../components/Avatar'
 import soundManager from '../utils/sounds'
 
 function HostLobby() {
@@ -12,7 +13,9 @@ function HostLobby() {
 
   // Create room on mount
   useEffect(() => {
+    console.log('🎯 HostLobby useEffect - isConnected:', isConnected, 'isHost:', isHost);
     if (isConnected && !isHost) {
+      console.log('📞 Calling createRoom...');
       createRoom()
     }
   }, [isConnected, isHost, createRoom])
@@ -109,10 +112,12 @@ function HostLobby() {
                 key={player.id}
                 initial={{ opacity: 0, scale: 0 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="player-avatar"
-                style={{ backgroundColor: player.color }}
+                className="flex flex-col items-center gap-1"
               >
-                {player.name.charAt(0).toUpperCase()}
+                <Avatar player={player} size="md" />
+                <span className="text-xs text-text-secondary max-w-[4rem] truncate text-center">
+                  {player.name}
+                </span>
               </motion.div>
             ))}
           </div>

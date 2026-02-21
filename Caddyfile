@@ -1,0 +1,22 @@
+# Caddyfile for Know What I Meme
+# Self-signed HTTPS for LAN access
+# Access via https://YOUR_SERVER_IP:8444 or https://YOUR_TAILSCALE_IP:8444
+
+{
+    https_port 8444
+}
+
+# LAN IP
+YOUR_SERVER_IP {
+    tls internal
+
+    reverse_proxy localhost:5173
+}
+
+# Tailscale IP
+YOUR_TAILSCALE_IP {
+    tls internal
+
+    reverse_proxy localhost:5173
+}
+

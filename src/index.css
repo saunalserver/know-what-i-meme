@@ -164,6 +164,9 @@ body {
   color: white;
   font-weight: 700;
   font-size: 1.125rem;
+  background-size: cover;
+  background-position: center;
+  flex-shrink: 0;
 }
 
 /* Meme card */

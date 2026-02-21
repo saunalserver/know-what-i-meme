@@ -44,6 +44,7 @@ export function setupSocketHandlers(io) {
 
     // Host creates a new room
     socket.on('host:create', () => {
+      console.log(`🏠 host:create received from ${socket.id}`);
       try {
         // Generate unique room code
         let code;
@@ -425,10 +426,29 @@ export function setupSocketHandlers(io) {
         const room = gameStore.getRoom(currentRoom);
         if (room) {
           if (isHost) {
-            // Host left - end game for everyone
-            io.to(currentRoom).emit('room:error', { message: 'Host disconnected. Game ended.' });
-            gameStore.deleteRoom(currentRoom);
-            console.log(`💀 Room ${currentRoom} deleted (host left)`);
+            // Host disconnected - give grace period for reconnection (handles React StrictMode)
+            // Only immediately delete if game is in progress
+            if (room.phase !== 'lobby' && room.phase !== 'waiting') {
+              io.to(currentRoom).emit('room:error', { message: 'Host disconnected. Game ended.' });
+              gameStore.deleteRoom(currentRoom);
+              console.log(`💀 Room ${currentRoom} deleted (host left during game)`);
+            } else {
+              // During lobby, wait 5 seconds before deleting (allows for React StrictMode reconnects)
+              console.log(`⏳ Host disconnected from ${currentRoom}, waiting 5s before cleanup...`);
+              setTimeout(() => {
+                // Check if room still exists and host never reconnected
+                const stillExists = gameStore.hasRoom(currentRoom);
+                if (stillExists) {
+                  const currentRoomState = gameStore.getRoom(currentRoom);
+                  // If host is still the same (didn't reconnect), delete
+                  if (currentRoomState && currentRoomState.hostId === socket.id) {
+                    io.to(currentRoom).emit('room:error', { message: 'Host disconnected. Game ended.' });
+                    gameStore.deleteRoom(currentRoom);
+                    console.log(`💀 Room ${currentRoom} deleted (host didn't reconnect)`);
+                  }
+                }
+              }, 5000);
+            }
           } else {
             // Player left - remove from room
             room.removePlayer(socket.id);

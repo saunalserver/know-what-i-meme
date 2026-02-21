@@ -247,11 +247,25 @@ export class GameRoom {
 
   calculateRoundResults() {
     const voteCounts = new Map();
+    const voteBreakdown = new Map(); // targetId -> array of voters
     const multiplier = this.getPointsMultiplier();
 
-    for (const targetId of this.votes.values()) {
+    for (const [voterId, targetId] of this.votes.entries()) {
       const count = voteCounts.get(targetId) || 0;
       voteCounts.set(targetId, count + 1);
+
+      // Track who voted for whom
+      if (!voteBreakdown.has(targetId)) {
+        voteBreakdown.set(targetId, []);
+      }
+      const voter = this.getPlayer(voterId);
+      if (voter) {
+        voteBreakdown.get(targetId).push({
+          voterId,
+          voterName: voter.name,
+          voterColor: voter.color,
+        });
+      }
     }
 
     // Award points (with multiplier for final round)
@@ -265,10 +279,13 @@ export class GameRoom {
       results.push({
         playerId: player.id,
         playerName: player.name,
+        playerColor: player.color,
+        playerPhoto: player.photo,
         gifUrl: player.currentGif,
         votesReceived,
         pointsEarned,
         multiplier,
+        voters: voteBreakdown.get(player.id) || [],
       });
     }
 

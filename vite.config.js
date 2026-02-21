@@ -8,5 +8,18 @@ export default defineConfig({
   server: {
     host: '0.0.0.0', // Listen on all interfaces (Tailscale, LAN)
     port: 5173,
+    proxy: {
+      // Proxy API requests to backend
+      '/api': {
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+      },
+      // Proxy Socket.io connections to backend
+      '/socket.io': {
+        target: 'http://localhost:3002',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
   },
 })

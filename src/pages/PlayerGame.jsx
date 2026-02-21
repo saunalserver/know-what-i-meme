@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import GifSearch from '../components/player/GifSearch'
+import Avatar from '../components/Avatar'
 import soundManager from '../utils/sounds'
 
 function PlayerGame() {
@@ -78,12 +79,7 @@ function PlayerGame() {
       {/* Header - Player Info */}
       <header className="bg-dark-secondary rounded-xl p-4 mb-4 flex items-center justify-between mx-4 mt-4">
         <div className="flex items-center gap-3">
-          <div
-            className="player-avatar w-10 h-10 text-base"
-            style={{ backgroundColor: myPlayer.color }}
-          >
-            {myPlayer.name.charAt(0)}
-          </div>
+          <Avatar player={myPlayer} size="sm" className="w-10 h-10 text-base" />
           <div>
             <p className="font-bold text-white">{myPlayer.name}</p>
             <p className="text-sm text-text-secondary">
@@ -244,36 +240,38 @@ function PlayerGame() {
               <p className="text-text-secondary mb-4">
                 "{gameState.currentPrompt}"
               </p>
+              <p className="text-text-muted text-sm mb-4">
+                Memes are anonymous until voting ends
+              </p>
 
-              <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
                 {gameState.players
                   .filter((p) => p.id !== player.id) // Can't vote for yourself
-                  .map((p) => {
+                  .map((p, index) => {
                     const myVote = gameState.votes?.[player.id]
                     const isSelected = myVote === p.id
                     return (
                       <button
                         key={p.id}
                         onClick={() => handleVote(p.id)}
-                        className={`w-full p-3 rounded-xl flex items-center gap-3 transition-all ${
+                        className={`rounded-xl overflow-hidden transition-all ${
                           isSelected
-                            ? 'bg-accent text-white ring-2 ring-accent-light'
-                            : 'bg-dark-secondary hover:bg-dark-tertiary'
+                            ? 'ring-4 ring-accent ring-offset-2 ring-offset-dark-primary'
+                            : 'hover:scale-105'
                         }`}
                       >
-                        <div
-                          className="player-avatar w-12 h-12 shrink-0"
-                          style={{ backgroundColor: p.color }}
-                        >
-                          {p.name.charAt(0)}
+                        <div className="relative">
+                          <img
+                            src={p.currentGif}
+                            alt={`Meme option ${index + 1}`}
+                            className="w-full h-32 object-cover"
+                          />
+                          {isSelected && (
+                            <div className="absolute inset-0 bg-accent/30 flex items-center justify-center">
+                              <span className="text-4xl">✓</span>
+                            </div>
+                          )}
                         </div>
-                        <img
-                          src={p.currentGif}
-                          alt={`${p.name}'s meme`}
-                          className="w-16 h-16 object-cover rounded-lg"
-                        />
-                        <span className="font-bold text-white">{p.name}</span>
-                        {isSelected && <span className="ml-auto">✓</span>}
                       </button>
                     )
                   })}
@@ -347,12 +345,7 @@ function PlayerGame() {
                       <span className="text-lg font-bold w-6">
                         {index === 0 ? '👑' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
                       </span>
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-                        style={{ backgroundColor: p.color }}
-                      >
-                        {p.name.charAt(0)}
-                      </div>
+                      <Avatar player={p} size="sm" />
                       <span className={`flex-1 font-medium ${p.id === player.id ? 'text-white' : 'text-text-secondary'}`}>
                         {p.name} {p.id === player.id && '(You)'}
                       </span>

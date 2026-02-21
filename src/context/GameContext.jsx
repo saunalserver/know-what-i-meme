@@ -80,12 +80,6 @@ export function GameProvider({ children }) {
     const handleConnect = () => {
       dispatch({ type: 'SET_CONNECTED', payload: true });
       console.log('✅ Connected to server');
-
-      // If we're a host with a room code, rejoin after reconnect
-      if (state.isHost && state.roomCode) {
-        console.log(`🔄 Rejoining as host for room ${state.roomCode}`);
-        socket.emit('host:rejoin', { code: state.roomCode });
-      }
     };
 
     const handleDisconnect = () => {
@@ -104,6 +98,7 @@ export function GameProvider({ children }) {
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
+      // Don't disconnect the socket on cleanup - it's a singleton
     };
   }, []);
 
@@ -184,6 +179,7 @@ export function GameProvider({ children }) {
 
   // Actions - ensure socket is connected before emitting
   const createRoom = useCallback(() => {
+    console.log('🏠 createRoom called, socket.connected:', socket.connected);
     if (!socket.connected) {
       console.log('⏳ Socket not connected, waiting...');
       socket.once('connect', () => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import Timer from '../components/Timer'
+import Avatar from '../components/Avatar'
 import soundManager from '../utils/sounds'
 import musicManager from '../utils/music'
 
@@ -104,12 +105,9 @@ function HostGame() {
               <h1 className="text-4xl font-bold text-white mb-4">Starting Soon...</h1>
               <div className="flex flex-wrap justify-center gap-4">
                 {gameState.players.map((p) => (
-                  <div
-                    key={p.id}
-                    className="player-avatar text-xl"
-                    style={{ backgroundColor: p.color }}
-                  >
-                    {p.name.charAt(0)}
+                  <div key={p.id} className="flex flex-col items-center gap-1">
+                    <Avatar player={p} size="lg" className="text-xl" />
+                    <span className="text-sm text-text-secondary">{p.name}</span>
                   </div>
                 ))}
               </div>
@@ -130,13 +128,13 @@ function HostGame() {
               </h2>
               <div className="flex flex-wrap justify-center gap-4">
                 {gameState.players.map((p) => (
-                  <div
+                  <Avatar
                     key={p.id}
-                    className={`player-avatar text-xl transition-opacity ${p.promptVote !== null ? 'opacity-100' : 'opacity-50 animate-pulse'}`}
-                    style={{ backgroundColor: p.color }}
-                  >
-                    {p.name.charAt(0)}
-                  </div>
+                    player={p}
+                    size="lg"
+                    className={`text-xl transition-opacity ${p.promptVote !== null ? 'opacity-100' : 'opacity-50'}`}
+                    showPulse={p.promptVote === null}
+                  />
                 ))}
               </div>
             </motion.div>
@@ -174,13 +172,13 @@ function HostGame() {
               </p>
               <div className="flex flex-wrap justify-center gap-4">
                 {gameState.players.map((p) => (
-                  <div
+                  <Avatar
                     key={p.id}
-                    className={`player-avatar text-xl transition-opacity ${p.hasSubmitted ? 'opacity-100' : 'opacity-50 animate-pulse'}`}
-                    style={{ backgroundColor: p.color }}
-                  >
-                    {p.name.charAt(0)}
-                  </div>
+                    player={p}
+                    size="lg"
+                    className={`text-xl transition-opacity ${p.hasSubmitted ? 'opacity-100' : 'opacity-50'}`}
+                    showPulse={!p.hasSubmitted}
+                  />
                 ))}
               </div>
             </motion.div>
@@ -195,11 +193,8 @@ function HostGame() {
               exit={{ opacity: 0, scale: 0.9 }}
               className="text-center w-full max-w-4xl"
             >
-              <div className="mb-4 text-2xl text-text-secondary">
-                <span
-                  className="inline-block w-10 h-10 rounded-full mr-2 align-middle"
-                  style={{ backgroundColor: currentMemePlayer.color }}
-                />
+              <div className="mb-4 text-2xl text-text-secondary flex items-center justify-center gap-2">
+                <Avatar player={currentMemePlayer} size="md" />
                 {currentMemePlayer.name}'s Meme
               </div>
 
@@ -236,23 +231,49 @@ function HostGame() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="text-center w-full max-w-4xl"
+              className="text-center w-full max-w-5xl"
             >
-              <h2 className="text-4xl text-white font-bold mb-4">
+              <h2 className="text-4xl text-white font-bold mb-2">
                 "{gameState.currentPrompt}"
               </h2>
-              <p className="text-2xl text-text-secondary mb-8">
-                Players are voting for their favorite...
+              <p className="text-xl text-text-secondary mb-6">
+                Vote for your favorite on your phone!
+              </p>
+
+              {/* Anonymous meme grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+                {gameState.players.map((p, index) => (
+                  <div
+                    key={p.id}
+                    className="bg-dark-secondary rounded-xl overflow-hidden"
+                  >
+                    <img
+                      src={p.currentGif}
+                      alt={`Meme ${index + 1}`}
+                      className="w-full h-40 object-cover"
+                    />
+                    <div className="p-2 text-center">
+                      <span className="text-lg font-bold text-text-secondary">
+                        Meme #{index + 1}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Voting progress */}
+              <p className="text-text-muted text-sm mb-4">
+                {gameState.players.filter(p => p.hasVoted).length} / {gameState.players.length} votes cast
               </p>
               <div className="flex flex-wrap justify-center gap-4">
                 {gameState.players.map((p) => (
-                  <div
+                  <Avatar
                     key={p.id}
-                    className={`player-avatar text-xl transition-opacity ${p.hasVoted ? 'opacity-100' : 'opacity-50 animate-pulse'}`}
-                    style={{ backgroundColor: p.color }}
-                  >
-                    {p.name.charAt(0)}
-                  </div>
+                    player={p}
+                    size="md"
+                    className={`transition-opacity ${p.hasVoted ? 'opacity-100 ring-2 ring-success' : 'opacity-50'}`}
+                    showPulse={!p.hasVoted}
+                  />
                 ))}
               </div>
             </motion.div>
@@ -290,27 +311,55 @@ function HostGame() {
                     initial={{ opacity: 0, x: -50 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.2 }}
-                    className={`card flex items-center gap-4 ${index === 0 ? 'ring-2 ring-success' : ''}`}
+                    className={`card ${index === 0 ? 'ring-2 ring-success' : ''}`}
                   >
-                    <div className="text-3xl font-bold text-accent w-12">
-                      #{index + 1}
+                    <div className="flex items-center gap-4">
+                      <div className="text-3xl font-bold text-accent w-12">
+                        #{index + 1}
+                      </div>
+                      <img
+                        src={result.gifUrl}
+                        alt="Meme"
+                        className="w-24 h-24 object-cover rounded-lg"
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Avatar player={{ photo: result.playerPhoto, color: result.playerColor, name: result.playerName }} size="sm" />
+                          <p className="text-xl font-bold text-white">{result.playerName}</p>
+                        </div>
+                        <p className="text-success text-lg">
+                          +{result.pointsEarned || result.votesReceived} pts
+                          {result.multiplier > 1 && (
+                            <span className="text-yellow-400 ml-2">
+                              ({result.votesReceived} × {result.multiplier})
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                    <img
-                      src={result.gifUrl}
-                      alt="Meme"
-                      className="w-24 h-24 object-cover rounded-lg"
-                    />
-                    <div className="flex-1">
-                      <p className="text-xl font-bold text-white">{result.playerName}</p>
-                      <p className="text-success">
-                        +{result.pointsEarned || result.votesReceived} pts
-                        {result.multiplier > 1 && (
-                          <span className="text-yellow-400 ml-2">
-                            ({result.votesReceived} × {result.multiplier})
-                          </span>
-                        )}
-                      </p>
-                    </div>
+
+                    {/* Vote breakdown - who voted for this player */}
+                    {result.voters && result.voters.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-dark-tertiary">
+                        <p className="text-text-muted text-sm mb-2">Voted by:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {result.voters.map((voter) => (
+                            <div
+                              key={voter.voterId}
+                              className="flex items-center gap-1 bg-dark-tertiary rounded-full px-2 py-1"
+                            >
+                              <div
+                                className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold"
+                                style={{ backgroundColor: voter.voterColor }}
+                              >
+                                {voter.voterName.charAt(0)}
+                              </div>
+                              <span className="text-sm text-text-secondary">{voter.voterName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 ))}
               </div>
@@ -359,12 +408,7 @@ function HostGame() {
                       <div className="text-3xl font-bold w-12">
                         {index === 0 ? '👑' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
                       </div>
-                      <div
-                        className="player-avatar w-12 h-12 text-lg"
-                        style={{ backgroundColor: player.color }}
-                      >
-                        {player.name.charAt(0)}
-                      </div>
+                      <Avatar player={player} size="md" />
                       <div className="flex-1 text-left">
                         <p className="text-xl font-bold text-white">{player.name}</p>
                       </div>
@@ -406,12 +450,7 @@ function HostGame() {
                       transition={{ duration: 1, repeat: Infinity }}
                       className="mb-8"
                     >
-                      <div
-                        className="player-avatar w-32 h-32 text-5xl mx-auto mb-4"
-                        style={{ backgroundColor: winner.color }}
-                      >
-                        {winner.name.charAt(0)}
-                      </div>
+                      <Avatar player={winner} size="2xl" className="mx-auto mb-4" />
                       <h3 className="text-4xl text-white font-bold">{winner.name}</h3>
                       <p className="text-2xl text-success mt-2">{winner.score} points</p>
                     </motion.div>
@@ -419,12 +458,7 @@ function HostGame() {
                     <div className="grid grid-cols-3 gap-4 mb-8">
                       {sorted.slice(1).map((player, index) => (
                         <div key={player.id} className="card">
-                          <div
-                            className="player-avatar w-12 h-12 mx-auto mb-2"
-                            style={{ backgroundColor: player.color }}
-                          >
-                            {player.name.charAt(0)}
-                          </div>
+                          <Avatar player={player} size="md" className="mx-auto mb-2" />
                           <p className="font-bold">{player.name}</p>
                           <p className="text-text-secondary">{player.score} pts</p>
                         </div>

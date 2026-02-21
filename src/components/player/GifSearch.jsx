@@ -2,10 +2,20 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 // Always use current hostname for API calls (works on Tailscale/LAN)
+// When on HTTPS (via Caddy), use same origin (Vite proxies to backend)
+// When on HTTP, connect directly to backend on port 3002
 const getApiUrl = () => {
   const protocol = window.location.protocol
   const hostname = window.location.hostname
-  return `${protocol}//${hostname}:3002`
+  const port = window.location.port
+
+  if (protocol === 'https:') {
+    // HTTPS via Caddy - use same origin (Vite proxy handles backend)
+    return port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`
+  } else {
+    // HTTP - connect directly to backend
+    return `${protocol}//${hostname}:3002`
+  }
 }
 
 const API_URL = getApiUrl()

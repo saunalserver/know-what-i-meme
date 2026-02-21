@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import GifSearch from '../components/player/GifSearch'
+import Timer from '../components/Timer'
 
 function PlayerGame() {
   const {
@@ -12,9 +13,16 @@ function PlayerGame() {
     castVote,
     error,
     clearError,
+    timer,
   } = useGame()
   const [selectedGif, setSelectedGif] = useState(null)
-  const [selectedPrompt, setSelectedPrompt] = useState(null)
+
+  // Clear selected GIF when a new round starts (phase changes to gif_search)
+  useEffect(() => {
+    if (gameState?.phase === 'gif_search') {
+      setSelectedGif(null)
+    }
+  }, [gameState?.phase, gameState?.currentRound])
 
   if (!gameState || !player) return null
 
@@ -22,10 +30,8 @@ function PlayerGame() {
   if (!myPlayer) return null
 
   const handlePromptVote = (index) => {
-    if (myPlayer.promptVote === null) {
-      setSelectedPrompt(index)
-      votePrompt(index)
-    }
+    // Toggle selection - clicking same prompt deselects it
+    votePrompt(index)
   }
 
   const handleGifSelect = (gifUrl) => {
@@ -39,13 +45,16 @@ function PlayerGame() {
   }
 
   const handleVote = (targetId) => {
-    if (!myPlayer.hasVoted && targetId !== player.id) {
+    if (targetId !== player.id) {
       castVote(targetId)
     }
   }
 
   return (
     <div className="min-h-screen bg-dark-primary p-4 pb-20">
+      {/* Timer */}
+      {timer && <Timer seconds={timer.seconds} total={timer.total} phase={timer.phase} />}
+
       {/* Error Toast */}
       {error && (
         <motion.div
@@ -104,12 +113,9 @@ function PlayerGame() {
                   <button
                     key={index}
                     onClick={() => handlePromptVote(index)}
-                    disabled={myPlayer.promptVote !== null}
                     className={`w-full text-left p-4 rounded-xl transition-all ${
                       myPlayer.promptVote === index
-                        ? 'bg-accent text-white'
-                        : myPlayer.promptVote !== null
-                        ? 'bg-dark-secondary opacity-50'
+                        ? 'bg-accent text-white ring-2 ring-accent-light'
                         : 'bg-dark-secondary hover:bg-dark-tertiary'
                     }`}
                   >
@@ -123,9 +129,13 @@ function PlayerGame() {
                 ))}
               </div>
 
-              {myPlayer.promptVote !== null && (
-                <p className="text-center text-success mt-4">
-                  ✓ Vote submitted! Waiting for others...
+              {myPlayer.promptVote !== null ? (
+                <p className="text-center text-text-secondary mt-4">
+                  ✓ Vote submitted! Tap again to change.
+                </p>
+              ) : (
+                <p className="text-center text-text-secondary mt-4">
+                  Tap to vote for your favorite prompt
                 </p>
               )}
             </motion.div>
@@ -213,36 +223,44 @@ function PlayerGame() {
               <div className="space-y-3">
                 {gameState.players
                   .filter((p) => p.id !== player.id) // Can't vote for yourself
-                  .map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => handleVote(p.id)}
-                      disabled={myPlayer.hasVoted}
-                      className={`w-full p-3 rounded-xl flex items-center gap-3 transition-all ${
-                        myPlayer.hasVoted
-                          ? 'bg-dark-secondary opacity-50'
-                          : 'bg-dark-secondary hover:bg-dark-tertiary'
-                      }`}
-                    >
-                      <div
-                        className="player-avatar w-12 h-12 shrink-0"
-                        style={{ backgroundColor: p.color }}
+                  .map((p) => {
+                    const myVote = gameState.votes?.[player.id]
+                    const isSelected = myVote === p.id
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => handleVote(p.id)}
+                        className={`w-full p-3 rounded-xl flex items-center gap-3 transition-all ${
+                          isSelected
+                            ? 'bg-accent text-white ring-2 ring-accent-light'
+                            : 'bg-dark-secondary hover:bg-dark-tertiary'
+                        }`}
                       >
-                        {p.name.charAt(0)}
-                      </div>
-                      <img
-                        src={p.currentGif}
-                        alt={`${p.name}'s meme`}
-                        className="w-16 h-16 object-cover rounded-lg"
-                      />
-                      <span className="font-bold text-white">{p.name}</span>
-                    </button>
-                  ))}
+                        <div
+                          className="player-avatar w-12 h-12 shrink-0"
+                          style={{ backgroundColor: p.color }}
+                        >
+                          {p.name.charAt(0)}
+                        </div>
+                        <img
+                          src={p.currentGif}
+                          alt={`${p.name}'s meme`}
+                          className="w-16 h-16 object-cover rounded-lg"
+                        />
+                        <span className="font-bold text-white">{p.name}</span>
+                        {isSelected && <span className="ml-auto">✓</span>}
+                      </button>
+                    )
+                  })}
               </div>
 
-              {myPlayer.hasVoted && (
-                <p className="text-center text-success mt-4">
-                  ✓ Vote submitted!
+              {myPlayer.hasVoted ? (
+                <p className="text-center text-text-secondary mt-4">
+                  ✓ Vote submitted! Tap another to change.
+                </p>
+              ) : (
+                <p className="text-center text-text-secondary mt-4">
+                  Tap to vote for the best meme
                 </p>
               )}
             </motion.div>
@@ -268,6 +286,59 @@ function PlayerGame() {
                 <p className="text-sm text-text-secondary">Your Score</p>
                 <p className="text-4xl font-bold text-accent">{myPlayer.score}</p>
               </div>
+            </motion.div>
+          )}
+
+          {/* LEADERBOARD */}
+          {gameState.phase === 'leaderboard' && (
+            <motion.div
+              key="leaderboard"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="py-6"
+            >
+              <h2 className="text-2xl font-bold text-white mb-1 text-center">
+                📊 Standings
+              </h2>
+              <p className="text-text-secondary text-center mb-6">
+                Round {gameState.currentRound} of {gameState.totalRounds}
+              </p>
+
+              <div className="space-y-2">
+                {[...gameState.players]
+                  .sort((a, b) => b.score - a.score)
+                  .map((p, index) => (
+                    <motion.div
+                      key={p.id}
+                      initial={{ opacity: 0, x: -30 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className={`flex items-center gap-3 p-3 rounded-xl ${
+                        p.id === player.id
+                          ? 'bg-accent/20 ring-2 ring-accent'
+                          : 'bg-dark-secondary'
+                      }`}
+                    >
+                      <span className="text-lg font-bold w-6">
+                        {index === 0 ? '👑' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
+                      </span>
+                      <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                        style={{ backgroundColor: p.color }}
+                      >
+                        {p.name.charAt(0)}
+                      </div>
+                      <span className={`flex-1 font-medium ${p.id === player.id ? 'text-white' : 'text-text-secondary'}`}>
+                        {p.name} {p.id === player.id && '(You)'}
+                      </span>
+                      <span className="font-bold text-accent">{p.score}</span>
+                    </motion.div>
+                  ))}
+              </div>
+
+              <p className="text-center text-text-secondary mt-6">
+                Watch the big screen to continue...
+              </p>
             </motion.div>
           )}
 

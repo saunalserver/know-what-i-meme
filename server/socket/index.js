@@ -97,6 +97,8 @@ export function setupSocketHandlers(io) {
     // Host starts the game
     socket.on('host:start', ({ rounds }) => {
       try {
+        console.log(`🎯 host:start received - isHost: ${isHost}, currentRoom: ${currentRoom}, rounds: ${rounds}`);
+
         if (!isHost || !currentRoom) {
           return socket.emit('room:error', { message: 'Only the host can start the game' });
         }
@@ -109,11 +111,18 @@ export function setupSocketHandlers(io) {
 
         room.startGame(rounds || 3);
 
-        io.to(currentRoom).emit('game:state', room.toJSON());
+        const state = room.toJSON();
+        console.log(`📤 Emitting game:state - phase: ${state.phase}, promptOptions:`, state.currentPromptOptions);
+
+        io.to(currentRoom).emit('game:state', state);
         io.to(currentRoom).emit('game:phase', { phase: room.phase });
+
+        // Start the prompt vote timer
+        room.startTimer('prompt_vote', io, currentRoom);
 
         console.log(`🎮 Game started in room ${currentRoom} with ${room.players.length} players`);
       } catch (error) {
+        console.error(`❌ Error in host:start:`, error);
         socket.emit('room:error', { message: error.message });
       }
     });
@@ -135,8 +144,8 @@ export function setupSocketHandlers(io) {
 
         const success = room.voteForPrompt(socket.id, promptIndex);
         if (!success) {
-          console.log(`❌ Vote rejected: already voted`);
-          return socket.emit('room:error', { message: 'Already voted' });
+          console.log(`❌ Vote rejected: invalid`);
+          return socket.emit('room:error', { message: 'Invalid vote' });
         }
 
         console.log(`✅ Vote accepted from ${socket.id} for prompt ${promptIndex}`);
@@ -144,12 +153,14 @@ export function setupSocketHandlers(io) {
         // Notify everyone of the vote
         io.to(currentRoom).emit('game:state', room.toJSON());
 
-        // Check if all voted
+        // Check if all voted - stop timer and advance
         if (room.allPlayersVotedForPrompt()) {
+          room.stopTimer();
           room.getWinningPrompt();
           room.phase = 'gif_search';
           io.to(currentRoom).emit('game:state', room.toJSON());
           io.to(currentRoom).emit('game:phase', { phase: 'gif_search' });
+          room.startTimer('gif_search', io, currentRoom);
           console.log(`📝 Room ${currentRoom}: All voted for prompt, moving to GIF search`);
         }
       } catch (error) {
@@ -176,8 +187,9 @@ export function setupSocketHandlers(io) {
         // Notify everyone
         io.to(currentRoom).emit('game:state', room.toJSON());
 
-        // Check if all submitted
+        // Check if all submitted - stop timer and advance
         if (room.allPlayersSubmitted()) {
+          room.stopTimer();
           room.phase = 'presentation';
           io.to(currentRoom).emit('game:state', room.toJSON());
           io.to(currentRoom).emit('game:phase', { phase: 'presentation' });
@@ -199,13 +211,15 @@ export function setupSocketHandlers(io) {
         room.presentationIndex++;
 
         if (room.presentationIndex >= room.players.length) {
-          // All memes shown, move to voting
+          // All memes shown, move to voting and start timer
           room.phase = 'voting';
           room.presentationIndex = 0;
+          io.to(currentRoom).emit('game:state', room.toJSON());
           io.to(currentRoom).emit('game:phase', { phase: 'voting' });
+          room.startTimer('voting', io, currentRoom);
+        } else {
+          io.to(currentRoom).emit('game:state', room.toJSON());
         }
-
-        io.to(currentRoom).emit('game:state', room.toJSON());
       } catch (error) {
         socket.emit('room:error', { message: error.message });
       }
@@ -223,14 +237,15 @@ export function setupSocketHandlers(io) {
 
         const success = room.castVote(socket.id, targetId);
         if (!success) {
-          return socket.emit('room:error', { message: 'Cannot vote (already voted or voting for yourself)' });
+          return socket.emit('room:error', { message: 'Cannot vote for yourself' });
         }
 
         // Notify everyone
         io.to(currentRoom).emit('game:state', room.toJSON());
 
-        // Check if all voted
+        // Check if all voted - stop timer and show results
         if (room.allPlayersVoted()) {
+          room.stopTimer();
           const results = room.calculateRoundResults();
           room.phase = 'round_results';
           io.to(currentRoom).emit('game:state', room.toJSON());
@@ -249,11 +264,26 @@ export function setupSocketHandlers(io) {
         if (!isHost || !currentRoom) return;
 
         const room = gameStore.getRoom(currentRoom);
-        if (room.phase !== 'round_results') return;
+        if (room.phase !== 'round_results' && room.phase !== 'leaderboard') return;
+
+        // If showing leaderboard, advance to next round
+        if (room.phase === 'leaderboard') {
+          room.currentRound++;
+          room.phase = 'prompt_vote';
+          room.preparePromptVoting();
+          io.to(currentRoom).emit('game:state', room.toJSON());
+          io.to(currentRoom).emit('game:phase', { phase: room.phase });
+          room.startTimer('prompt_vote', io, currentRoom);
+          console.log(`🔄 Room ${currentRoom}: Starting round ${room.currentRound}`);
+          return;
+        }
 
         if (room.currentRound >= room.totalRounds) {
           // Game over
           room.phase = 'final_results';
+        } else if (room.shouldShowLeaderboard()) {
+          // Show leaderboard every 3 rounds for games with 5+ rounds
+          room.phase = 'leaderboard';
         } else {
           // Next round
           room.currentRound++;
@@ -264,10 +294,13 @@ export function setupSocketHandlers(io) {
         io.to(currentRoom).emit('game:state', room.toJSON());
         io.to(currentRoom).emit('game:phase', { phase: room.phase });
 
-        if (room.phase === 'final_results') {
-          console.log(`🎉 Room ${currentRoom}: Game complete!`);
-        } else {
+        if (room.phase === 'prompt_vote') {
+          room.startTimer('prompt_vote', io, currentRoom);
           console.log(`🔄 Room ${currentRoom}: Starting round ${room.currentRound}`);
+        } else if (room.phase === 'final_results') {
+          console.log(`🎉 Room ${currentRoom}: Game complete!`);
+        } else if (room.phase === 'leaderboard') {
+          console.log(`📊 Room ${currentRoom}: Showing leaderboard at round ${room.currentRound}`);
         }
       } catch (error) {
         socket.emit('room:error', { message: error.message });

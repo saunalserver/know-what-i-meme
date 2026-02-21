@@ -114,9 +114,9 @@ function HostLobby() {
             onChange={(e) => setRounds(Number(e.target.value))}
             className="bg-dark-tertiary text-white rounded-lg px-4 py-2 border-2 border-dark-tertiary focus:border-accent outline-none"
           >
-            <option value={3}>3 Rounds</option>
-            <option value={5}>5 Rounds</option>
-            <option value={7}>7 Rounds</option>
+            {[...Array(15)].map((_, i) => (
+              <option key={i + 1} value={i + 1}>{i + 1} Round{i + 1 > 1 ? 's' : ''}</option>
+            ))}
           </select>
         </div>
 

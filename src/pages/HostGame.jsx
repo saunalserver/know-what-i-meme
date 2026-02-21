@@ -1,20 +1,9 @@
-import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
+import Timer from '../components/Timer'
 
 function HostGame() {
-  const { gameState, advancePresentation, nextRound, roundResults } = useGame()
-  const [showingMeme, setShowingMeme] = useState(null)
-
-  // Handle presentation auto-advance
-  useEffect(() => {
-    if (gameState?.phase === 'presentation') {
-      const player = gameState.players[gameState.presentationIndex]
-      if (player) {
-        setShowingMeme(player)
-      }
-    }
-  }, [gameState?.phase, gameState?.presentationIndex, gameState?.players])
+  const { gameState, advancePresentation, nextRound, roundResults, timer } = useGame()
 
   if (!gameState) return null
 
@@ -22,6 +11,9 @@ function HostGame() {
 
   return (
     <div className="min-h-screen bg-dark-primary flex flex-col">
+      {/* Timer */}
+      {timer && <Timer seconds={timer.seconds} total={timer.total} phase={timer.phase} />}
+
       {/* Header */}
       <header className="bg-dark-secondary p-4 flex justify-between items-center">
         <div className="text-text-secondary">
@@ -236,6 +228,64 @@ function HostGame() {
                 {gameState.currentRound >= gameState.totalRounds
                   ? 'See Final Results'
                   : 'Next Round →'}
+              </button>
+            </motion.div>
+          )}
+
+          {/* LEADERBOARD (every 3 rounds for games 5+ rounds) */}
+          {gameState.phase === 'leaderboard' && (
+            <motion.div
+              key="leaderboard"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="text-center w-full max-w-4xl"
+            >
+              <h2 className="text-4xl text-white font-bold mb-2">
+                📊 Leaderboard
+              </h2>
+              <p className="text-text-secondary mb-8">
+                After Round {gameState.currentRound} of {gameState.totalRounds}
+              </p>
+
+              <div className="space-y-3 mb-8">
+                {[...gameState.players]
+                  .sort((a, b) => b.score - a.score)
+                  .map((player, index) => (
+                    <motion.div
+                      key={player.id}
+                      initial={{ opacity: 0, x: -50 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.15 }}
+                      className={`flex items-center gap-4 p-4 rounded-xl ${
+                        index === 0
+                          ? 'bg-gradient-to-r from-yellow-500/20 to-transparent ring-2 ring-yellow-500'
+                          : 'bg-dark-secondary'
+                      }`}
+                    >
+                      <div className="text-3xl font-bold w-12">
+                        {index === 0 ? '👑' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
+                      </div>
+                      <div
+                        className="player-avatar w-12 h-12 text-lg"
+                        style={{ backgroundColor: player.color }}
+                      >
+                        {player.name.charAt(0)}
+                      </div>
+                      <div className="flex-1 text-left">
+                        <p className="text-xl font-bold text-white">{player.name}</p>
+                      </div>
+                      <div className="text-2xl font-bold text-accent">
+                        {player.score} pts
+                      </div>
+                    </motion.div>
+                  ))}
+              </div>
+
+              <button
+                onClick={nextRound}
+                className="btn-success text-xl px-12 py-4"
+              >
+                Continue to Round {gameState.currentRound + 1} →
               </button>
             </motion.div>
           )}

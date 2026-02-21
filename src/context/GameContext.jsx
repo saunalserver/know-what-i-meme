@@ -11,6 +11,7 @@ const initialState = {
   gameState: null,
   error: null,
   roundResults: null,
+  timer: null, // { phase, seconds, total }
 };
 
 function gameReducer(state, action) {
@@ -54,6 +55,12 @@ function gameReducer(state, action) {
           ? { ...state.gameState, players: action.payload.players }
           : null,
       };
+
+    case 'SET_TIMER':
+      return { ...state, timer: action.payload };
+
+    case 'CLEAR_TIMER':
+      return { ...state, timer: null };
 
     case 'RESET':
       return initialState;
@@ -136,22 +143,36 @@ export function GameProvider({ children }) {
       dispatch({ type: 'SET_ROUND_RESULTS', payload: results });
     };
 
+    const handleTimerUpdate = (timerData) => {
+      dispatch({ type: 'SET_TIMER', payload: timerData });
+    };
+
+    // Clear timer when phase changes to something without a timer
+    const handlePhaseChangeWithTimer = ({ phase }) => {
+      console.log('Phase changed:', phase);
+      if (!['prompt_vote', 'gif_search', 'voting'].includes(phase)) {
+        dispatch({ type: 'CLEAR_TIMER' });
+      }
+    };
+
     socket.on('room:created', handleRoomCreated);
     socket.on('room:joined', handleRoomJoined);
     socket.on('room:error', handleRoomError);
     socket.on('game:state', handleGameState);
-    socket.on('game:phase', handlePhaseChange);
+    socket.on('game:phase', handlePhaseChangeWithTimer);
     socket.on('players:update', handlePlayersUpdate);
     socket.on('round:results', handleRoundResults);
+    socket.on('timer:update', handleTimerUpdate);
 
     return () => {
       socket.off('room:created', handleRoomCreated);
       socket.off('room:joined', handleRoomJoined);
       socket.off('room:error', handleRoomError);
       socket.off('game:state', handleGameState);
-      socket.off('game:phase', handlePhaseChange);
+      socket.off('game:phase', handlePhaseChangeWithTimer);
       socket.off('players:update', handlePlayersUpdate);
       socket.off('round:results', handleRoundResults);
+      socket.off('timer:update', handleTimerUpdate);
     };
   }, [state.gameState]);
 

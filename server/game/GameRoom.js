@@ -1,12 +1,12 @@
 import { Player } from './Player.js';
-import { getRandomPrompts } from '../data/prompts.js';
+import { getRandomPrompts, fillPlayerPlaceholders } from '../data/prompts.js';
 
 export class GameRoom {
   constructor(code, hostId) {
     this.code = code;
     this.hostId = hostId;
     this.players = [];
-    this.phase = 'lobby'; // lobby, waiting, prompt_vote, gif_search, presentation, voting, round_results, final_results
+    this.phase = 'lobby'; // lobby, waiting, prompt_vote, gif_search, presentation, voting, round_results, leaderboard, final_results
     this.currentRound = 0;
     this.totalRounds = 3;
     this.prompts = [];
@@ -17,6 +17,105 @@ export class GameRoom {
     this.votes = new Map(); // voterId -> targetId
     this.presentationIndex = 0;
     this.createdAt = Date.now();
+
+    // Timer state
+    this.timerSeconds = 0;
+    this.timerPhase = null; // Which phase the timer is for
+  }
+
+  // Timer durations in seconds
+  static TIMER_DURATIONS = {
+    prompt_vote: 30,
+    gif_search: 60,
+    voting: 30,
+  };
+
+  startTimer(phase, io, roomCode) {
+    this.timerPhase = phase;
+    this.timerSeconds = GameRoom.TIMER_DURATIONS[phase] || 30;
+
+    // Emit initial timer state
+    io.to(roomCode).emit('timer:update', {
+      phase,
+      seconds: this.timerSeconds,
+      total: GameRoom.TIMER_DURATIONS[phase] || 30
+    });
+
+    // Clear any existing interval
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
+
+    // Start countdown
+    this.timerInterval = setInterval(() => {
+      this.timerSeconds--;
+
+      io.to(roomCode).emit('timer:update', {
+        phase,
+        seconds: this.timerSeconds,
+        total: GameRoom.TIMER_DURATIONS[phase] || 30
+      });
+
+      if (this.timerSeconds <= 0) {
+        this.handleTimerExpired(phase, io, roomCode);
+      }
+    }, 1000);
+  }
+
+  stopTimer() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+    this.timerSeconds = 0;
+    this.timerPhase = null;
+  }
+
+  handleTimerExpired(phase, io, roomCode) {
+    this.stopTimer();
+
+    if (phase === 'prompt_vote') {
+      // Force select winning prompt from current votes
+      if (this.promptVotes.size > 0) {
+        this.getWinningPrompt();
+      } else {
+        // No votes? Pick random
+        this.currentPrompt = this.currentPromptOptions[Math.floor(Math.random() * 3)];
+      }
+      this.phase = 'gif_search';
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'gif_search' });
+      this.startTimer('gif_search', io, roomCode);
+    } else if (phase === 'gif_search') {
+      // Submit empty GIF for players who haven't submitted
+      this.players.forEach(p => {
+        if (!p.hasSubmitted) {
+          p.currentGif = 'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif'; // Default "no GIF" placeholder
+          p.hasSubmitted = true;
+        }
+      });
+      this.phase = 'presentation';
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'presentation' });
+    } else if (phase === 'voting') {
+      // Calculate results with current votes
+      const results = this.calculateRoundResults();
+      this.phase = 'round_results';
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'round_results' });
+      io.to(roomCode).emit('round:results', { results });
+    }
+  }
+
+  // Check if we should show leaderboard (every 3 rounds for games with 5+ rounds)
+  shouldShowLeaderboard() {
+    return this.totalRounds >= 5 && this.currentRound > 0 && this.currentRound % 3 === 0;
+  }
+
+  getLeaderboard() {
+    return [...this.players]
+      .map(p => ({ id: p.id, name: p.name, score: p.score, color: p.color }))
+      .sort((a, b) => b.score - a.score);
   }
 
   addPlayer(playerId, playerName) {
@@ -44,7 +143,11 @@ export class GameRoom {
   }
 
   preparePromptVoting() {
-    this.currentPromptOptions = getRandomPrompts(3);
+    // Get raw prompts, then fill in player names
+    const rawPrompts = getRandomPrompts(3, true); // includeEdgy = true
+    this.currentPromptOptions = rawPrompts.map(prompt =>
+      fillPlayerPlaceholders(prompt, this.players)
+    );
     this.promptVotes.clear();
     // Initialize votes to 0
     this.currentPromptOptions.forEach((_, index) => {
@@ -59,7 +162,22 @@ export class GameRoom {
 
   voteForPrompt(playerId, promptIndex) {
     const player = this.getPlayer(playerId);
-    if (!player || player.promptVote !== null) return false;
+    if (!player) return false;
+
+    // If clicking the same prompt, deselect it
+    if (player.promptVote === promptIndex) {
+      // Remove previous vote from count
+      const prevCount = this.promptVotes.get(promptIndex) || 0;
+      this.promptVotes.set(promptIndex, Math.max(0, prevCount - 1));
+      player.promptVote = null;
+      return true;
+    }
+
+    // If already voted for a different prompt, switch vote
+    if (player.promptVote !== null) {
+      const prevCount = this.promptVotes.get(player.promptVote) || 0;
+      this.promptVotes.set(player.promptVote, Math.max(0, prevCount - 1));
+    }
 
     player.promptVote = promptIndex;
     const currentCount = this.promptVotes.get(promptIndex) || 0;
@@ -102,9 +220,10 @@ export class GameRoom {
 
   castVote(voterId, targetId) {
     const voter = this.getPlayer(voterId);
-    if (!voter || voter.hasVoted) return false;
+    if (!voter) return false;
     if (voterId === targetId) return false; // Can't vote for yourself
 
+    // Allow changing votes - just update the vote
     voter.hasVoted = true;
     this.votes.set(voterId, targetId);
     return true;

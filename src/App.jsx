@@ -15,6 +15,9 @@ function App() {
   const hostShouldBeInLobby = isHost && gameState && gameState.phase === 'lobby'
   const hostShouldBeInGame = isHost && gameState && gameState.phase !== 'lobby'
 
+  // Debug logging
+  console.log('App render - isHost:', isHost, 'gameState:', gameState?.phase, 'hostShouldBeInGame:', hostShouldBeInGame)
+
   return (
     <div className="min-h-screen bg-dark-primary">
       <Routes>

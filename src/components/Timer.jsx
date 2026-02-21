@@ -1,11 +1,30 @@
+import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
+import soundManager from '../utils/sounds'
 
 export function Timer({ seconds, total, phase }) {
+  const prevSecondsRef = useRef(seconds)
+
   if (!seconds && seconds !== 0) return null
 
   const percentage = (seconds / total) * 100
   const isUrgent = seconds <= 10
   const isCritical = seconds <= 5
+
+  // Play sounds based on countdown
+  useEffect(() => {
+    // Only play if seconds changed
+    if (prevSecondsRef.current !== seconds) {
+      if (seconds === 10 && prevSecondsRef.current > 10) {
+        soundManager.timerUrgent()
+      } else if (seconds === 5 && prevSecondsRef.current > 5) {
+        soundManager.timerCritical()
+      } else if (seconds <= 3 && seconds > 0 && prevSecondsRef.current !== seconds) {
+        soundManager.timerFinal()
+      }
+    }
+    prevSecondsRef.current = seconds
+  }, [seconds])
 
   const formatTime = (s) => {
     const mins = Math.floor(s / 60)

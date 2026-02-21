@@ -258,6 +258,77 @@ export function setupSocketHandlers(io) {
       }
     });
 
+    // Host resets the game (back to lobby with same players)
+    socket.on('host:reset', () => {
+      try {
+        if (!isHost || !currentRoom) return;
+
+        const room = gameStore.getRoom(currentRoom);
+        if (!room) return;
+
+        // Stop any running timer
+        room.stopTimer();
+
+        // Reset game state but keep players
+        room.phase = 'lobby';
+        room.currentRound = 0;
+        room.currentPrompt = null;
+        room.currentPromptOptions = [];
+        room.promptVotes.clear();
+        room.submissions.clear();
+        room.votes.clear();
+        room.presentationIndex = 0;
+
+        // Reset player states
+        room.players.forEach(p => {
+          p.currentGif = null;
+          p.hasVoted = false;
+          p.hasSubmitted = false;
+          p.promptVote = null;
+          // Keep scores or reset? Let's reset for a fresh game
+          p.score = 0;
+        });
+
+        io.to(currentRoom).emit('game:state', room.toJSON());
+        io.to(currentRoom).emit('game:phase', { phase: 'lobby' });
+        console.log(`🔄 Room ${currentRoom}: Game reset to lobby`);
+      } catch (error) {
+        socket.emit('room:error', { message: error.message });
+      }
+    });
+
+    // Host restarts the game with same players (skip lobby, start immediately)
+    socket.on('host:restart', ({ rounds }) => {
+      try {
+        if (!isHost || !currentRoom) return;
+
+        const room = gameStore.getRoom(currentRoom);
+        if (!room) return;
+
+        // Stop any running timer
+        room.stopTimer();
+
+        // Reset player states and scores
+        room.players.forEach(p => {
+          p.currentGif = null;
+          p.hasVoted = false;
+          p.hasSubmitted = false;
+          p.promptVote = null;
+          p.score = 0;
+        });
+
+        // Start the game
+        room.startGame(rounds || room.totalRounds);
+
+        io.to(currentRoom).emit('game:state', room.toJSON());
+        io.to(currentRoom).emit('game:phase', { phase: room.phase });
+        room.startTimer('prompt_vote', io, currentRoom);
+        console.log(`🔄 Room ${currentRoom}: Game restarted with ${room.players.length} players`);
+      } catch (error) {
+        socket.emit('room:error', { message: error.message });
+      }
+    });
+
     // Host advances to next round or final results
     socket.on('host:next', () => {
       try {

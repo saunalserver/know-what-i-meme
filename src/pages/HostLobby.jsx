@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import QRCode from 'qrcode'
 import { useGame } from '../context/GameContext'
+import soundManager from '../utils/sounds'
 
 function HostLobby() {
   const { createRoom, gameState, isHost, error, clearError, startGame, isConnected } = useGame()
   const [qrCode, setQrCode] = useState('')
   const [rounds, setRounds] = useState(3)
+  const prevPlayerCountRef = useRef(0)
 
   // Create room on mount
   useEffect(() => {
@@ -25,8 +27,18 @@ function HostLobby() {
     }
   }, [gameState?.code])
 
+  // Play sound when new player joins
+  useEffect(() => {
+    const currentPlayerCount = gameState?.players?.length || 0
+    if (currentPlayerCount > prevPlayerCountRef.current && prevPlayerCountRef.current > 0) {
+      soundManager.playerJoin()
+    }
+    prevPlayerCountRef.current = currentPlayerCount
+  }, [gameState?.players?.length])
+
   const handleStartGame = () => {
     if (gameState?.players?.length >= 2) {
+      soundManager.success()
       startGame(rounds)
     }
   }

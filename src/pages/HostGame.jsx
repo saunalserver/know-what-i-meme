@@ -1,9 +1,29 @@
+import { useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import Timer from '../components/Timer'
+import soundManager from '../utils/sounds'
 
 function HostGame() {
-  const { gameState, advancePresentation, nextRound, roundResults, timer } = useGame()
+  const { gameState, advancePresentation, nextRound, roundResults, timer, resetGame, restartGame } = useGame()
+  const prevPhaseRef = useRef(null)
+
+  // Play phase transition sounds
+  useEffect(() => {
+    if (prevPhaseRef.current && prevPhaseRef.current !== gameState?.phase) {
+      // Phase changed
+      if (gameState?.phase === 'presentation') {
+        soundManager.whoosh()
+      } else if (gameState?.phase === 'round_results') {
+        soundManager.roundComplete()
+      } else if (gameState?.phase === 'final_results') {
+        soundManager.celebration()
+      } else if (gameState?.phase === 'prompt_vote' || gameState?.phase === 'gif_search' || gameState?.phase === 'voting') {
+        soundManager.whoosh()
+      }
+    }
+    prevPhaseRef.current = gameState?.phase
+  }, [gameState?.phase])
 
   if (!gameState) return null
 
@@ -19,8 +39,19 @@ function HostGame() {
         <div className="text-text-secondary">
           Room: <span className="text-accent font-bold">{gameState.code}</span>
         </div>
-        <div className="text-text-secondary">
-          Round {gameState.currentRound} / {gameState.totalRounds}
+        <div className="flex items-center gap-4">
+          <div className="text-text-secondary">
+            Round {gameState.currentRound} / {gameState.totalRounds}
+          </div>
+          {/* Host Controls - always visible during game */}
+          {gameState.phase !== 'lobby' && gameState.phase !== 'final_results' && (
+            <button
+              onClick={resetGame}
+              className="px-3 py-1 text-sm bg-error/20 hover:bg-error/40 text-error rounded-lg transition-colors"
+            >
+              Reset
+            </button>
+          )}
         </div>
       </header>
 
@@ -340,9 +371,26 @@ function HostGame() {
                 )
               })()}
 
-              <p className="text-text-secondary text-xl">
-                Thanks for playing! Refresh to start a new game.
-              </p>
+              {/* Play Again Controls */}
+              <div className="flex flex-col gap-4 items-center">
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => restartGame(gameState.totalRounds)}
+                    className="btn-success text-xl px-8 py-4"
+                  >
+                    🔄 Play Again ({gameState.totalRounds} rounds)
+                  </button>
+                  <button
+                    onClick={resetGame}
+                    className="btn-primary text-xl px-8 py-4"
+                  >
+                    🏠 Back to Lobby
+                  </button>
+                </div>
+                <p className="text-text-secondary text-sm mt-4">
+                  Same players, fresh start!
+                </p>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

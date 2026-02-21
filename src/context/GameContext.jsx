@@ -238,6 +238,18 @@ export function GameProvider({ children }) {
     }
   }, []);
 
+  const resetGame = useCallback(() => {
+    if (socket.connected) {
+      socket.emit('host:reset');
+    }
+  }, []);
+
+  const restartGame = useCallback((rounds) => {
+    if (socket.connected) {
+      socket.emit('host:restart', { rounds });
+    }
+  }, []);
+
   const clearError = useCallback(() => {
     dispatch({ type: 'CLEAR_ERROR' });
   }, []);
@@ -252,6 +264,8 @@ export function GameProvider({ children }) {
     castVote,
     advancePresentation,
     nextRound,
+    resetGame,
+    restartGame,
     clearError,
   };
 

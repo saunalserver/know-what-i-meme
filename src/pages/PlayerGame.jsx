@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import GifSearch from '../components/player/GifSearch'
 import Timer from '../components/Timer'
+import soundManager from '../utils/sounds'
 
 function PlayerGame() {
   const {
@@ -20,9 +21,15 @@ function PlayerGame() {
   // Clear selected GIF when a new round starts (phase changes to gif_search)
   useEffect(() => {
     if (gameState?.phase === 'gif_search') {
-      setSelectedGif(null)
+      // Sync with server state - if player has already submitted, show their current GIF
+      const myPlayer = gameState.players.find((p) => p.id === player?.id)
+      if (myPlayer?.hasSubmitted && myPlayer?.currentGif) {
+        setSelectedGif(myPlayer.currentGif)
+      } else {
+        setSelectedGif(null)
+      }
     }
-  }, [gameState?.phase, gameState?.currentRound])
+  }, [gameState?.phase, gameState?.currentRound, gameState?.players, player?.id])
 
   if (!gameState || !player) return null
 
@@ -31,21 +38,25 @@ function PlayerGame() {
 
   const handlePromptVote = (index) => {
     // Toggle selection - clicking same prompt deselects it
+    soundManager.select()
     votePrompt(index)
   }
 
   const handleGifSelect = (gifUrl) => {
+    soundManager.select()
     setSelectedGif(gifUrl)
   }
 
   const handleSubmitGif = () => {
-    if (selectedGif && !myPlayer.hasSubmitted) {
+    if (selectedGif) {
+      soundManager.success()
       submitGif(selectedGif)
     }
   }
 
   const handleVote = (targetId) => {
     if (targetId !== player.id) {
+      soundManager.voteReceived()
       castVote(targetId)
     }
   }
@@ -167,19 +178,20 @@ function PlayerGame() {
                 selectedGif={selectedGif}
               />
 
-              {/* Submit Button */}
-              {selectedGif && !myPlayer.hasSubmitted && (
+              {/* Submit Button - always show if GIF selected, allow changes */}
+              {selectedGif && (
                 <motion.button
+                  key={myPlayer.hasSubmitted ? 'change' : 'submit'}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   onClick={handleSubmitGif}
-                  className="btn-success w-full mt-4 text-lg py-4"
+                  className={`w-full mt-4 text-lg py-4 ${myPlayer.hasSubmitted ? 'bg-accent hover:bg-accent/80' : 'btn-success'}`}
                 >
-                  Submit GIF
+                  {myPlayer.hasSubmitted ? 'Change GIF' : 'Submit GIF'}
                 </motion.button>
               )}
 
-              {myPlayer.hasSubmitted && (
+              {myPlayer.hasSubmitted && !selectedGif && (
                 <p className="text-center text-success mt-4">
                   ✓ GIF submitted! Waiting for others...
                 </p>
@@ -364,6 +376,12 @@ function PlayerGame() {
               <p className="text-text-secondary">
                 Check the big screen for the winner!
               </p>
+
+              <div className="mt-6 p-4 bg-dark-secondary rounded-xl">
+                <p className="text-text-secondary text-sm">
+                  Waiting for host to start a new game...
+                </p>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

@@ -206,8 +206,10 @@ export class GameRoom {
 
   submitGif(playerId, gifUrl) {
     const player = this.getPlayer(playerId);
-    if (!player || player.hasSubmitted) return false;
+    if (!player) return false;
 
+    // Allow changing GIF during the timer period
+    // Just update the GIF URL (hasSubmitted stays true once they've submitted once)
     player.currentGif = gifUrl;
     player.hasSubmitted = true;
     this.submissions.set(playerId, gifUrl);

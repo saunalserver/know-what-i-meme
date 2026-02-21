@@ -1,0 +1,221 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* Custom theme colors */
+@theme {
+  --color-dark-primary: #1a1a2e;
+  --color-dark-secondary: #16213e;
+  --color-dark-tertiary: #0f3460;
+  --color-accent: #7289da;
+  --color-accent-hover: #5b6eae;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #b9bbbe;
+  --color-text-muted: #72767d;
+  --color-success: #43b581;
+  --color-error: #f04747;
+  --color-warning: #faa61a;
+
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-bounce-slow: bounce 2s infinite;
+  --animate-fade-in: fadeIn 0.5s ease-out;
+  --animate-slide-up: slideUp 0.3s ease-out;
+  --animate-scale-in: scaleIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes slideUp {
+  0% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes scaleIn {
+  0% { transform: scale(0.9); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #1a1a2e;
+  color: #ffffff;
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #16213e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #7289da;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5b6eae;
+}
+
+/* GIF grid animations */
+.gif-item {
+  transition: transform 200ms;
+  cursor: pointer;
+}
+
+.gif-item:hover {
+  transform: scale(1.05);
+}
+
+/* Button styles */
+.btn-primary {
+  background-color: #7289da;
+  color: white;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  transition: all 200ms;
+}
+
+.btn-primary:hover {
+  background-color: #5b6eae;
+  transform: scale(1.05);
+}
+
+.btn-secondary {
+  background-color: #16213e;
+  color: white;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  transition: all 200ms;
+}
+
+.btn-secondary:hover {
+  background-color: #0f3460;
+}
+
+.btn-success {
+  background-color: #43b581;
+  color: white;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  transition: all 200ms;
+}
+
+.btn-success:hover {
+  opacity: 0.8;
+}
+
+/* Card styles */
+.card {
+  background-color: #16213e;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+}
+
+/* Input styles */
+.input {
+  background-color: #0f3460;
+  color: white;
+  border: 2px solid #0f3460;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  outline: none;
+  transition: border-color 200ms;
+  width: 100%;
+}
+
+.input:focus {
+  border-color: #7289da;
+}
+
+/* Room code display */
+.room-code {
+  font-family: 'Inter', monospace;
+  font-weight: 800;
+  letter-spacing: 0.5em;
+  text-shadow: 0 0 20px rgba(114, 137, 218, 0.5);
+}
+
+/* Player avatar */
+.player-avatar {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 1.125rem;
+}
+
+/* Meme card */
+.meme-card {
+  background-color: #16213e;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* Vote button */
+.vote-btn {
+  background-color: #7289da;
+  color: white;
+  font-weight: 700;
+  padding: 1rem 2rem;
+  border-radius: 9999px;
+  transition: all 200ms;
+}
+
+.vote-btn:hover {
+  background-color: #5b6eae;
+  transform: scale(1.1);
+}
+
+/* Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(114, 137, 218, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(114, 137, 218, 0.6); }
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+@keyframes confetti {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(-100vh) rotate(720deg); opacity: 0; }
+}
+
+.confetti {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  animation: confetti 3s ease-out forwards;
+}

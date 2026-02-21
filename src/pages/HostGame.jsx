@@ -1,17 +1,30 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import Timer from '../components/Timer'
 import soundManager from '../utils/sounds'
+import musicManager from '../utils/music'
 
 function HostGame() {
   const { gameState, advancePresentation, nextRound, roundResults, timer, resetGame, restartGame } = useGame()
   const prevPhaseRef = useRef(null)
+  const [musicEnabled, setMusicEnabled] = useState(true)
+
+  // Play ambient background music based on phase
+  useEffect(() => {
+    if (gameState?.phase && musicEnabled) {
+      musicManager.play(gameState.phase)
+    } else if (!musicEnabled) {
+      musicManager.stop()
+    }
+    return () => {
+      musicManager.stop()
+    }
+  }, [gameState?.phase, musicEnabled])
 
   // Play phase transition sounds
   useEffect(() => {
     if (prevPhaseRef.current && prevPhaseRef.current !== gameState?.phase) {
-      // Phase changed
       if (gameState?.phase === 'presentation') {
         soundManager.whoosh()
       } else if (gameState?.phase === 'round_results') {
@@ -25,21 +38,42 @@ function HostGame() {
     prevPhaseRef.current = gameState?.phase
   }, [gameState?.phase])
 
+  const toggleMusic = () => {
+    setMusicEnabled(!musicEnabled)
+    musicManager.setEnabled(!musicEnabled)
+  }
+
   if (!gameState) return null
 
   const currentMemePlayer = gameState.players[gameState.presentationIndex]
 
   return (
-    <div className="min-h-screen bg-dark-primary flex flex-col">
-      {/* Timer */}
-      {timer && <Timer seconds={timer.seconds} total={timer.total} phase={timer.phase} />}
+    <div className="min-h-screen bg-dark-primary flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      {/* Timer - positioned at top, doesn't block content */}
+      {timer && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-dark-primary" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+          <Timer seconds={timer.seconds} total={timer.total} phase={timer.phase} />
+        </div>
+      )}
 
-      {/* Header */}
-      <header className="bg-dark-secondary p-4 flex justify-between items-center">
+      {/* Header - add top margin when timer is present */}
+      <header className={`bg-dark-secondary p-4 flex justify-between items-center ${timer ? 'mt-14' : ''}`}>
         <div className="text-text-secondary">
           Room: <span className="text-accent font-bold">{gameState.code}</span>
         </div>
         <div className="flex items-center gap-4">
+          {/* Music Toggle */}
+          <button
+            onClick={toggleMusic}
+            className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+              musicEnabled
+                ? 'bg-accent/20 hover:bg-accent/40 text-accent'
+                : 'bg-dark-tertiary hover:bg-dark-tertiary/80 text-text-secondary'
+            }`}
+            title={musicEnabled ? 'Mute Music' : 'Enable Music'}
+          >
+            {musicEnabled ? '🎵' : '🔇'}
+          </button>
           <div className="text-text-secondary">
             Round {gameState.currentRound} / {gameState.totalRounds}
           </div>
@@ -117,6 +151,18 @@ function HostGame() {
               exit={{ opacity: 0 }}
               className="text-center w-full max-w-4xl"
             >
+              {/* Final Round Banner */}
+              {gameState.isFinalRound && (
+                <motion.div
+                  initial={{ scale: 0, rotate: -10 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  className="mb-6"
+                >
+                  <div className="inline-block bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-8 py-3 rounded-full text-2xl font-bold shadow-lg">
+                    🏆 FINAL ROUND - 2X POINTS! 🏆
+                  </div>
+                </motion.div>
+              )}
               <h2 className="text-2xl text-text-secondary mb-4">Prompt:</h2>
               <div className="bg-dark-secondary rounded-xl p-8 mb-8">
                 <p className="text-4xl text-white font-bold">
@@ -221,6 +267,18 @@ function HostGame() {
               exit={{ opacity: 0, y: -20 }}
               className="text-center w-full max-w-4xl"
             >
+              {/* Final Round Banner in Results */}
+              {gameState.isFinalRound && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="mb-4"
+                >
+                  <div className="inline-block bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-2 rounded-full text-lg font-bold">
+                    🏆 FINAL ROUND - 2X POINTS! 🏆
+                  </div>
+                </motion.div>
+              )}
               <h2 className="text-4xl text-white font-bold mb-8">
                 Round {gameState.currentRound} Results!
               </h2>
@@ -245,7 +303,12 @@ function HostGame() {
                     <div className="flex-1">
                       <p className="text-xl font-bold text-white">{result.playerName}</p>
                       <p className="text-success">
-                        +{result.votesReceived} {result.votesReceived === 1 ? 'vote' : 'votes'}
+                        +{result.pointsEarned || result.votesReceived} pts
+                        {result.multiplier > 1 && (
+                          <span className="text-yellow-400 ml-2">
+                            ({result.votesReceived} × {result.multiplier})
+                          </span>
+                        )}
                       </p>
                     </div>
                   </motion.div>

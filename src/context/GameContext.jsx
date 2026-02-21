@@ -80,6 +80,12 @@ export function GameProvider({ children }) {
     const handleConnect = () => {
       dispatch({ type: 'SET_CONNECTED', payload: true });
       console.log('✅ Connected to server');
+
+      // If we're a host with a room code, rejoin after reconnect
+      if (state.isHost && state.roomCode) {
+        console.log(`🔄 Rejoining as host for room ${state.roomCode}`);
+        socket.emit('host:rejoin', { code: state.roomCode });
+      }
     };
 
     const handleDisconnect = () => {
@@ -191,14 +197,14 @@ export function GameProvider({ children }) {
     }
   }, []);
 
-  const joinRoom = useCallback((code, name) => {
+  const joinRoom = useCallback((code, name, photo = null) => {
     if (!socket.connected) {
       socket.once('connect', () => {
-        socket.emit('player:join', { code, name });
+        socket.emit('player:join', { code, name, photo });
       });
       connectSocket();
     } else {
-      socket.emit('player:join', { code, name });
+      socket.emit('player:join', { code, name, photo });
     }
   }, []);
 
@@ -246,9 +252,9 @@ export function GameProvider({ children }) {
 
   const restartGame = useCallback((rounds) => {
     if (socket.connected) {
-      socket.emit('host:restart', { rounds });
+      socket.emit('host:restart', { rounds, roomCode: state.roomCode });
     }
-  }, []);
+  }, [state.roomCode]);
 
   const clearError = useCallback(() => {
     dispatch({ type: 'CLEAR_ERROR' });

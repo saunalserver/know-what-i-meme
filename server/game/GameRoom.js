@@ -118,8 +118,8 @@ export class GameRoom {
       .sort((a, b) => b.score - a.score);
   }
 
-  addPlayer(playerId, playerName) {
-    const player = new Player(playerId, playerName);
+  addPlayer(playerId, playerName, photo = null) {
+    const player = new Player(playerId, playerName, photo);
     this.players.push(player);
     return player;
   }
@@ -235,26 +235,40 @@ export class GameRoom {
     return this.players.every(p => p.hasVoted);
   }
 
+  // Check if this is the final round
+  isFinalRound() {
+    return this.currentRound >= this.totalRounds;
+  }
+
+  // Get points multiplier (2x for final round)
+  getPointsMultiplier() {
+    return this.isFinalRound() ? 2 : 1;
+  }
+
   calculateRoundResults() {
     const voteCounts = new Map();
+    const multiplier = this.getPointsMultiplier();
 
     for (const targetId of this.votes.values()) {
       const count = voteCounts.get(targetId) || 0;
       voteCounts.set(targetId, count + 1);
     }
 
-    // Award points
+    // Award points (with multiplier for final round)
     const results = [];
     for (const player of this.players) {
       const votesReceived = voteCounts.get(player.id) || 0;
-      if (votesReceived > 0) {
-        player.addScore(votesReceived);
+      const pointsEarned = votesReceived * multiplier;
+      if (pointsEarned > 0) {
+        player.addScore(pointsEarned);
       }
       results.push({
         playerId: player.id,
         playerName: player.name,
         gifUrl: player.currentGif,
         votesReceived,
+        pointsEarned,
+        multiplier,
       });
     }
 
@@ -320,6 +334,8 @@ export class GameRoom {
       votes: Object.fromEntries(this.votes),
       presentationIndex: this.presentationIndex,
       playerCount: this.players.length,
+      isFinalRound: this.isFinalRound(),
+      pointsMultiplier: this.getPointsMultiplier(),
     };
   }
 }

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import GifSearch from '../components/player/GifSearch'
-import Timer from '../components/Timer'
 import soundManager from '../utils/sounds'
 
 function PlayerGame() {
@@ -14,7 +13,6 @@ function PlayerGame() {
     castVote,
     error,
     clearError,
-    timer,
   } = useGame()
   const [selectedGif, setSelectedGif] = useState(null)
 
@@ -62,10 +60,7 @@ function PlayerGame() {
   }
 
   return (
-    <div className="min-h-screen bg-dark-primary p-4 pb-20">
-      {/* Timer */}
-      {timer && <Timer seconds={timer.seconds} total={timer.total} phase={timer.phase} />}
-
+    <div className="min-h-screen bg-dark-primary flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
       {/* Error Toast */}
       {error && (
         <motion.div
@@ -81,7 +76,7 @@ function PlayerGame() {
       )}
 
       {/* Header - Player Info */}
-      <header className="bg-dark-secondary rounded-xl p-4 mb-4 flex items-center justify-between">
+      <header className="bg-dark-secondary rounded-xl p-4 mb-4 flex items-center justify-between mx-4 mt-4">
         <div className="flex items-center gap-3">
           <div
             className="player-avatar w-10 h-10 text-base"
@@ -104,8 +99,8 @@ function PlayerGame() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main>
+      {/* Main Content - with horizontal margin */}
+      <main className="flex-1 flex flex-col mx-4 pb-4">
         <AnimatePresence mode="wait">
           {/* PROMPT VOTE */}
           {gameState.phase === 'prompt_vote' && (
@@ -159,43 +154,61 @@ function PlayerGame() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
+              className="flex flex-col flex-1 pb-24" /* Add padding for sticky button */
             >
-              {/* Prompt Display */}
-              <div className="bg-dark-secondary rounded-xl p-4 mb-4">
-                <p className="text-sm text-text-secondary mb-1">Prompt:</p>
-                <p className="text-xl font-bold text-white">
+              {/* Prompt Display - more compact */}
+              <div className="bg-dark-secondary rounded-xl p-3 mb-2">
+                <p className="text-lg font-bold text-white">
                   "{gameState.currentPrompt}"
                 </p>
               </div>
 
-              <h3 className="text-lg font-bold text-white mb-3">
-                Find the perfect GIF
-              </h3>
+              {/* GIF Search Component - takes remaining space */}
+              <div className="flex-1">
+                <GifSearch
+                  onSelect={handleGifSelect}
+                  selectedGif={selectedGif}
+                />
+              </div>
 
-              {/* GIF Search Component */}
-              <GifSearch
-                onSelect={handleGifSelect}
-                selectedGif={selectedGif}
-              />
+              {/* Sticky Submit Button Area - with safe area for iOS */}
+              <div
+                className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-dark-primary via-dark-primary to-transparent pt-8"
+                style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+              >
+                {/* Submit Button */}
+                {selectedGif && !myPlayer.hasSubmitted && (
+                  <motion.button
+                    key="submit"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    onClick={handleSubmitGif}
+                    className="w-full btn-success text-lg py-4"
+                  >
+                    ✓ Submit GIF
+                  </motion.button>
+                )}
 
-              {/* Submit Button - always show if GIF selected, allow changes */}
-              {selectedGif && (
-                <motion.button
-                  key={myPlayer.hasSubmitted ? 'change' : 'submit'}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  onClick={handleSubmitGif}
-                  className={`w-full mt-4 text-lg py-4 ${myPlayer.hasSubmitted ? 'bg-accent hover:bg-accent/80' : 'btn-success'}`}
-                >
-                  {myPlayer.hasSubmitted ? 'Change GIF' : 'Submit GIF'}
-                </motion.button>
-              )}
-
-              {myPlayer.hasSubmitted && !selectedGif && (
-                <p className="text-center text-success mt-4">
-                  ✓ GIF submitted! Waiting for others...
-                </p>
-              )}
+                {/* Already submitted */}
+                {myPlayer.hasSubmitted && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <div className="bg-success/20 border border-success/40 rounded-xl p-3 text-center mb-2">
+                      <p className="text-success font-bold">✓ GIF Submitted!</p>
+                    </div>
+                    {selectedGif && selectedGif !== myPlayer.currentGif && (
+                      <button
+                        onClick={handleSubmitGif}
+                        className="w-full bg-warning hover:bg-warning/80 text-dark-primary font-bold text-lg py-4 rounded-xl transition-colors"
+                      >
+                        🔄 Update to New GIF
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+              </div>
             </motion.div>
           )}
 

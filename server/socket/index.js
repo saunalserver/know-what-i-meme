@@ -17,6 +17,31 @@ export function setupSocketHandlers(io) {
     // LOBBY HANDLERS
     // ============================================
 
+    // Host rejoins after reconnect (updates hostId to new socket.id)
+    socket.on('host:rejoin', ({ code }) => {
+      try {
+        code = code.toUpperCase();
+
+        if (!gameStore.hasRoom(code)) {
+          return socket.emit('room:error', { message: 'Room not found' });
+        }
+
+        const room = gameStore.getRoom(code);
+
+        // Update the host's socket ID to the new one
+        const oldHostId = room.hostId;
+        room.hostId = socket.id;
+        currentRoom = code;
+        isHost = true;
+        socket.join(code);
+
+        console.log(`🔄 Host rejoined room ${code}: ${oldHostId} -> ${socket.id}`);
+        socket.emit('room:created', { code, gameState: room.toJSON() });
+      } catch (error) {
+        socket.emit('room:error', { message: error.message });
+      }
+    });
+
     // Host creates a new room
     socket.on('host:create', () => {
       try {
@@ -43,7 +68,7 @@ export function setupSocketHandlers(io) {
     });
 
     // Player joins an existing room
-    socket.on('player:join', ({ code, name }) => {
+    socket.on('player:join', ({ code, name, photo }) => {
       try {
         code = code.toUpperCase();
 
@@ -67,8 +92,8 @@ export function setupSocketHandlers(io) {
           return socket.emit('room:error', { message: 'Room is full' });
         }
 
-        // Add player
-        const player = room.addPlayer(socket.id, name);
+        // Add player with photo
+        const player = room.addPlayer(socket.id, name, photo);
         currentRoom = code;
         isHost = false;
         socket.join(code);
@@ -298,12 +323,23 @@ export function setupSocketHandlers(io) {
     });
 
     // Host restarts the game with same players (skip lobby, start immediately)
-    socket.on('host:restart', ({ rounds }) => {
+    socket.on('host:restart', ({ rounds, roomCode }) => {
       try {
-        if (!isHost || !currentRoom) return;
+        const targetRoom = roomCode || currentRoom;
 
-        const room = gameStore.getRoom(currentRoom);
-        if (!room) return;
+        if (!targetRoom) {
+          return socket.emit('room:error', { message: 'No room specified' });
+        }
+
+        const room = gameStore.getRoom(targetRoom);
+        if (!room) {
+          return socket.emit('room:error', { message: 'Room not found' });
+        }
+
+        // Verify this socket is the host (check room.hostId instead of closure variable)
+        if (room.hostId !== socket.id) {
+          return socket.emit('room:error', { message: 'Only the host can restart the game' });
+        }
 
         // Stop any running timer
         room.stopTimer();
@@ -320,10 +356,10 @@ export function setupSocketHandlers(io) {
         // Start the game
         room.startGame(rounds || room.totalRounds);
 
-        io.to(currentRoom).emit('game:state', room.toJSON());
-        io.to(currentRoom).emit('game:phase', { phase: room.phase });
-        room.startTimer('prompt_vote', io, currentRoom);
-        console.log(`🔄 Room ${currentRoom}: Game restarted with ${room.players.length} players`);
+        io.to(targetRoom).emit('game:state', room.toJSON());
+        io.to(targetRoom).emit('game:phase', { phase: room.phase });
+        room.startTimer('prompt_vote', io, targetRoom);
+        console.log(`🔄 Room ${targetRoom}: Game restarted with ${room.players.length} players`);
       } catch (error) {
         socket.emit('room:error', { message: error.message });
       }

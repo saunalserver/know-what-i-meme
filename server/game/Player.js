@@ -1,8 +1,9 @@
 // Player class
 export class Player {
-  constructor(id, name) {
+  constructor(id, name, photo = null) {
     this.id = id;
     this.name = name;
+    this.photo = photo; // Base64 data URL
     this.color = this.generateColor();
     this.score = 0;
     this.currentGif = null;
@@ -34,6 +35,7 @@ export class Player {
     return {
       id: this.id,
       name: this.name,
+      photo: this.photo,
       color: this.color,
       score: this.score,
       currentGif: this.currentGif,

@@ -27,12 +27,12 @@ function PlayerJoin() {
   const handleSubmit = (e) => {
     e.preventDefault()
     if (code.length === 4 && name.trim()) {
-      joinRoom(code.toUpperCase(), name.trim())
+      joinRoom(code.toUpperCase(), name.trim(), null)
     }
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8 bg-gradient-to-br from-dark-primary via-dark-secondary to-dark-tertiary">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-dark-primary via-dark-secondary to-dark-tertiary" style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       {/* Error display */}
       {error && (
         <motion.div
@@ -52,7 +52,6 @@ function PlayerJoin() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md"
       >
-        {/* Title */}
         <h1 className="text-4xl font-bold text-white text-center mb-8">
           <span className="text-accent">Join</span> a Game
         </h1>
@@ -104,7 +103,6 @@ function PlayerJoin() {
           </button>
         </form>
 
-        {/* Back Button */}
         <button
           onClick={() => navigate('/')}
           className="mt-6 w-full text-text-secondary hover:text-white transition-colors"

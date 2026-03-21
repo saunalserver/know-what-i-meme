@@ -46,7 +46,15 @@ function HostGame() {
 
   if (!gameState) return null
 
-  const currentMemePlayer = gameState.players[gameState.presentationIndex]
+  // Use randomized presentation order for anonymous display
+  const getCurrentMemePlayer = () => {
+    if (!gameState.presentationOrder || gameState.presentationOrder.length === 0) {
+      return gameState.players[gameState.presentationIndex]
+    }
+    const playerId = gameState.presentationOrder[gameState.presentationIndex]
+    return gameState.players.find(p => p.id === playerId)
+  }
+  const currentMemePlayer = getCurrentMemePlayer()
 
   return (
     <div className="min-h-screen bg-dark-primary flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
@@ -191,27 +199,30 @@ function HostGame() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="text-center w-full max-w-4xl"
+              className="text-center w-full h-full flex flex-col items-center justify-center"
             >
-              <div className="mb-4 text-2xl text-text-secondary flex items-center justify-center gap-2">
-                <Avatar player={currentMemePlayer} size="md" />
-                {currentMemePlayer.name}'s Meme
+              {/* Anonymous header - just show meme number */}
+              <div className="mb-6 text-3xl text-text-secondary font-bold">
+                Meme #{gameState.presentationIndex + 1}
               </div>
 
-              <div className="meme-card max-w-2xl mx-auto">
-                <div className="bg-dark-tertiary p-6">
-                  <p className="text-2xl text-white font-bold mb-4">
-                    "{gameState.currentPrompt}"
-                  </p>
-                </div>
-                {currentMemePlayer.currentGif && (
+              {/* Prompt at top */}
+              <div className="bg-dark-secondary rounded-xl p-6 mb-6 max-w-3xl mx-auto">
+                <p className="text-3xl text-white font-bold">
+                  "{gameState.currentPrompt}"
+                </p>
+              </div>
+
+              {/* Large centered GIF */}
+              {currentMemePlayer.currentGif && (
+                <div className="flex-1 flex items-center justify-center w-full max-w-5xl mx-auto">
                   <img
                     src={currentMemePlayer.currentGif}
                     alt="Meme GIF"
-                    className="w-full max-h-[60vh] object-contain"
+                    className="max-w-full max-h-[65vh] object-contain rounded-xl shadow-2xl"
                   />
-                )}
-              </div>
+                </div>
+              )}
 
               <button
                 onClick={advancePresentation}
@@ -240,25 +251,29 @@ function HostGame() {
                 Vote for your favorite on your phone!
               </p>
 
-              {/* Anonymous meme grid */}
+              {/* Anonymous meme grid - use randomized order to match presentation */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
-                {gameState.players.map((p, index) => (
-                  <div
-                    key={p.id}
-                    className="bg-dark-secondary rounded-xl overflow-hidden"
-                  >
-                    <img
-                      src={p.currentGif}
-                      alt={`Meme ${index + 1}`}
-                      className="w-full h-40 object-cover"
-                    />
-                    <div className="p-2 text-center">
-                      <span className="text-lg font-bold text-text-secondary">
-                        Meme #{index + 1}
-                      </span>
+                {(gameState.presentationOrder || gameState.players.map(p => p.id)).map((playerId, index) => {
+                  const player = gameState.players.find(p => p.id === playerId)
+                  if (!player) return null
+                  return (
+                    <div
+                      key={playerId}
+                      className="bg-dark-secondary rounded-xl overflow-hidden"
+                    >
+                      <img
+                        src={player.currentGif}
+                        alt={`Meme ${index + 1}`}
+                        className="w-full h-40 object-cover"
+                      />
+                      <div className="p-2 text-center">
+                        <span className="text-lg font-bold text-text-secondary">
+                          Meme #{index + 1}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               {/* Voting progress */}

@@ -245,9 +245,11 @@ function PlayerGame() {
               </p>
 
               <div className="grid grid-cols-2 gap-3">
-                {gameState.players
-                  .filter((p) => p.id !== player.id) // Can't vote for yourself
-                  .map((p, index) => {
+                {/* Use randomized order to match presentation */}
+                {(gameState.presentationOrder || gameState.players.map(p => p.id))
+                  .map((playerId, originalIndex) => {
+                    const p = gameState.players.find(pl => pl.id === playerId)
+                    if (!p || p.id === player.id) return null // Can't vote for yourself
                     const myVote = gameState.votes?.[player.id]
                     const isSelected = myVote === p.id
                     return (
@@ -263,9 +265,13 @@ function PlayerGame() {
                         <div className="relative">
                           <img
                             src={p.currentGif}
-                            alt={`Meme option ${index + 1}`}
+                            alt={`Meme ${originalIndex + 1}`}
                             className="w-full h-32 object-cover"
                           />
+                          {/* Show meme number label */}
+                          <div className="absolute top-2 left-2 bg-dark-primary/80 px-2 py-1 rounded text-sm font-bold">
+                            #{originalIndex + 1}
+                          </div>
                           {isSelected && (
                             <div className="absolute inset-0 bg-accent/30 flex items-center justify-center">
                               <span className="text-4xl">✓</span>

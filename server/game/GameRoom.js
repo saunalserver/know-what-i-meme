@@ -1,6 +1,16 @@
 import { Player } from './Player.js';
 import { getRandomPrompts, fillPlayerPlaceholders } from '../data/prompts.js';
 
+// Fisher-Yates shuffle
+function shuffleArray(array) {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
 export class GameRoom {
   constructor(code, hostId) {
     this.code = code;
@@ -16,6 +26,7 @@ export class GameRoom {
     this.submissions = new Map(); // playerId -> gifUrl
     this.votes = new Map(); // voterId -> targetId
     this.presentationIndex = 0;
+    this.presentationOrder = []; // Randomized player IDs for anonymous presentation
     this.createdAt = Date.now();
 
     // Timer state
@@ -158,6 +169,8 @@ export class GameRoom {
     this.submissions.clear();
     this.votes.clear();
     this.presentationIndex = 0;
+    // Randomize presentation order for this round
+    this.presentationOrder = shuffleArray(this.players.map(p => p.id));
   }
 
   voteForPrompt(playerId, promptIndex) {
@@ -350,6 +363,7 @@ export class GameRoom {
       submissions: Object.fromEntries(this.submissions),
       votes: Object.fromEntries(this.votes),
       presentationIndex: this.presentationIndex,
+      presentationOrder: this.presentationOrder,
       playerCount: this.players.length,
       isFinalRound: this.isFinalRound(),
       pointsMultiplier: this.getPointsMultiplier(),

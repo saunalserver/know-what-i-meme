@@ -27,7 +27,8 @@ const getSocketConfig = () => {
     url: socketUrl,
     options: {
       autoConnect: false,
-      transports: ['polling', 'websocket'],
+      // Try websocket first on HTTPS (avoids polling issues through proxies)
+      transports: currentProtocol === 'https:' ? ['websocket', 'polling'] : ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,

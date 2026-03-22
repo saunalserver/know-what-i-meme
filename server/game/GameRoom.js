@@ -120,6 +120,58 @@ export class GameRoom {
     }
   }
 
+  startPresentationTimer(io, roomCode) {
+    this.timerPhase = 'presentation';
+    this.timerSeconds = GameRoom.TIMER_DURATIONS.presentation;
+
+    // Emit initial timer state
+    io.to(roomCode).emit('timer:update', {
+      phase: 'presentation',
+      seconds: this.timerSeconds,
+      total: GameRoom.TIMER_DURATIONS.presentation,
+    });
+
+    // Clear any existing interval
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
+
+    // Start countdown
+    this.timerInterval = setInterval(() => {
+      this.timerSeconds--;
+
+      io.to(roomCode).emit('timer:update', {
+        phase: 'presentation',
+        seconds: this.timerSeconds,
+        total: GameRoom.TIMER_DURATIONS.presentation,
+      });
+
+      if (this.timerSeconds <= 0) {
+        this.handlePresentationTimerExpired(io, roomCode);
+      }
+    }, 1000);
+  }
+
+  handlePresentationTimerExpired(io, roomCode) {
+    this.stopTimer();
+
+    // Advance to next meme or voting phase
+    this.presentationIndex++;
+
+    if (this.presentationIndex >= this.players.length) {
+      // All memes shown, move to voting
+      this.phase = 'voting';
+      this.presentationIndex = 0;
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'voting' });
+      this.startTimer('voting', io, roomCode);
+    } else {
+      // Show next meme, restart presentation timer
+      io.to(roomCode).emit('game:state', this.toJSON());
+      this.startPresentationTimer(io, roomCode);
+    }
+  }
+
   // Check if we should show leaderboard (every 3 rounds for games with 5+ rounds)
   shouldShowLeaderboard() {
     return this.totalRounds >= 5 && this.currentRound > 0 && this.currentRound % 3 === 0;

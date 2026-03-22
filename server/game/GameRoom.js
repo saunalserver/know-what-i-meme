@@ -172,6 +172,66 @@ export class GameRoom {
     }
   }
 
+  startRoundResultsTimer(io, roomCode) {
+    this.timerPhase = 'round_results';
+    this.timerSeconds = GameRoom.TIMER_DURATIONS.round_results;
+
+    // Emit initial timer state
+    io.to(roomCode).emit('timer:update', {
+      phase: 'round_results',
+      seconds: this.timerSeconds,
+      total: GameRoom.TIMER_DURATIONS.round_results,
+    });
+
+    // Clear any existing interval
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
+
+    // Start countdown
+    this.timerInterval = setInterval(() => {
+      this.timerSeconds--;
+
+      io.to(roomCode).emit('timer:update', {
+        phase: 'round_results',
+        seconds: this.timerSeconds,
+        total: GameRoom.TIMER_DURATIONS.round_results,
+      });
+
+      if (this.timerSeconds <= 0) {
+        this.handleRoundResultsTimerExpired(io, roomCode);
+      }
+    }, 1000);
+  }
+
+  handleRoundResultsTimerExpired(io, roomCode) {
+    this.stopTimer();
+
+    // Determine next phase (same logic as host:next handler)
+    if (this.currentRound >= this.totalRounds) {
+      // Game over
+      this.phase = 'final_results';
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'final_results' });
+      console.log(`🎉 Room ${roomCode}: Game complete!`);
+    } else if (this.shouldShowLeaderboard()) {
+      // Show leaderboard every 3 rounds for games with 5+ rounds
+      this.phase = 'leaderboard';
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'leaderboard' });
+      console.log(`📊 Room ${roomCode}: Showing leaderboard at round ${this.currentRound}`);
+    } else {
+      // Next round
+      this.currentRound++;
+      this.phase = 'prompt_vote';
+      this.preparePromptVoting();
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'prompt_vote' });
+      this.startTimer('prompt_vote', io, roomCode);
+      console.log(`🔄 Room ${roomCode}: Starting round ${this.currentRound}`);
+    }
+  }
+
   // Check if we should show leaderboard (every 3 rounds for games with 5+ rounds)
   shouldShowLeaderboard() {
     return this.totalRounds >= 5 && this.currentRound > 0 && this.currentRound % 3 === 0;

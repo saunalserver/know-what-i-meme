@@ -37,6 +37,8 @@ export function Timer({ seconds, total, phase }) {
       case 'prompt_vote': return 'Vote for Prompt'
       case 'gif_search': return 'Find a GIF'
       case 'voting': return 'Cast Your Vote'
+      case 'presentation': return 'Viewing Memes'
+      case 'round_results': return 'Round Complete'
       default: return ''
     }
   }

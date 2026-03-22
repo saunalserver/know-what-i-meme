@@ -219,6 +219,7 @@ export function setupSocketHandlers(io) {
           room.phase = 'presentation';
           io.to(currentRoom).emit('game:state', room.toJSON());
           io.to(currentRoom).emit('game:phase', { phase: 'presentation' });
+          room.startPresentationTimer(io, currentRoom);
           console.log(`🖼️ Room ${currentRoom}: All GIFs submitted, starting presentation`);
         }
       } catch (error) {
@@ -234,6 +235,9 @@ export function setupSocketHandlers(io) {
         const room = gameStore.getRoom(currentRoom);
         if (room.phase !== 'presentation') return;
 
+        // Stop auto-advance timer (manual override)
+        room.stopTimer();
+
         room.presentationIndex++;
 
         if (room.presentationIndex >= room.players.length) {
@@ -245,6 +249,8 @@ export function setupSocketHandlers(io) {
           room.startTimer('voting', io, currentRoom);
         } else {
           io.to(currentRoom).emit('game:state', room.toJSON());
+          // Restart presentation timer for next meme
+          room.startPresentationTimer(io, currentRoom);
         }
       } catch (error) {
         socket.emit('room:error', { message: error.message });
@@ -277,6 +283,7 @@ export function setupSocketHandlers(io) {
           io.to(currentRoom).emit('game:state', room.toJSON());
           io.to(currentRoom).emit('game:phase', { phase: 'round_results' });
           io.to(currentRoom).emit('round:results', { results });
+          room.startRoundResultsTimer(io, currentRoom);
           console.log(`🏆 Room ${currentRoom}: Round ${room.currentRound} complete`);
         }
       } catch (error) {
@@ -373,6 +380,9 @@ export function setupSocketHandlers(io) {
 
         const room = gameStore.getRoom(currentRoom);
         if (room.phase !== 'round_results' && room.phase !== 'leaderboard') return;
+
+        // Stop auto-advance timer (manual override)
+        room.stopTimer();
 
         // If showing leaderboard, advance to next round
         if (room.phase === 'leaderboard') {

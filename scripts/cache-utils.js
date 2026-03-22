@@ -25,7 +25,7 @@ export function initializeCache() {
     fs.mkdirSync(GIFS_DIR, { recursive: true });
   }
   if (!fs.existsSync(INDEX_FILE)) {
-    fs.writeFileSync(INDEX_FILE, JSON.stringify({ gifs: {}, tags: {} }, null, 2));
+    fs.writeFileSync(INDEX_FILE, JSON.stringify({ gifs: {}, tags: {}, contentHashes: {} }, null, 2));
   }
   if (!fs.existsSync(STATS_FILE)) {
     fs.writeFileSync(STATS_FILE, JSON.stringify({
@@ -82,13 +82,39 @@ export function gifExists(source, gifId) {
   return !!index.gifs[cacheKey];
 }
 
+// Compute content hash from buffer
+export function computeContentHash(buffer) {
+  return crypto.createHash('md5').update(buffer).digest('hex');
+}
+
+// Check if content hash already exists (prevents identical GIFs with different IDs)
+export function contentHashExists(contentHash) {
+  const index = loadIndex();
+  // Ensure contentHashes object exists (for legacy indexes)
+  if (!index.contentHashes) {
+    index.contentHashes = {};
+  }
+  return !!index.contentHashes[contentHash];
+}
+
 // Add GIF to index
 export function addGifToIndex(gif) {
   const index = loadIndex();
   const cacheKey = `${gif.source}:${gif.id}`;
 
-  // Don't add duplicates
+  // Ensure contentHashes object exists (for legacy indexes)
+  if (!index.contentHashes) {
+    index.contentHashes = {};
+  }
+
+  // Don't add duplicates by ID
   if (index.gifs[cacheKey]) {
+    return false;
+  }
+
+  // Don't add duplicates by content hash
+  if (gif.contentHash && index.contentHashes[gif.contentHash]) {
+    console.log(`Skipping duplicate content: ${gif.id} (same as ${index.contentHashes[gif.contentHash]})`);
     return false;
   }
 
@@ -105,8 +131,14 @@ export function addGifToIndex(gif) {
     height: gif.height,
     fileSize: gif.fileSize,
     searchQuery: gif.searchQuery,
+    contentHash: gif.contentHash,
     fetchedAt: new Date().toISOString()
   };
+
+  // Add to content hash index
+  if (gif.contentHash) {
+    index.contentHashes[gif.contentHash] = cacheKey;
+  }
 
   // Add to tags index
   for (const tag of (gif.tags || [])) {

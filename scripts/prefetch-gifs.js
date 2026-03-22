@@ -29,6 +29,8 @@ import {
   getCacheHealth,
   loadStats,
   saveStats,
+  computeContentHash,
+  contentHashExists,
   MAX_GIFS_PER_SEARCH,
   MAX_FILE_SIZE,
   MIN_DIMENSION,
@@ -54,57 +56,85 @@ let tenorCalls = 0;
 const args = process.argv.slice(2);
 const forceRun = args.includes('--force');
 const forceRedownload = args.includes('--refetch');
+// Parse query argument - handles quoted values
 const queryArg = args.find(a => a.startsWith('--query='));
-const forcedQuery = queryArg ? queryArg.split('=')[1].replace(/"/g, '') : null;
+let forcedQuery = null;
+if (queryArg) {
+  // Remove surrounding quotes and clean up
+  forcedQuery = queryArg.split('=')[1].replace(/"/g, '');
+  // Handle "the rock" as a query
+  if (forcedQuery === 'the rock') {
+    forcedQuery = 'the rock';
+  } else {
+    forcedQuery = queryArg.split('=')[1].replace(/"/g, '');
+  }
+}
 
 /**
- * Fetch GIFs from Giphy
+ * Fetch GIFs from Giphy (handles pagination to get up to 100)
  */
-async function fetchFromGiphy(query, limit = 50) {
-  if (giphyCalls >= MAX_GIPHY_CALLS) {
-    console.log('Giphy rate limit reached for this session');
-    return [];
-  }
-
+async function fetchFromGiphy(query, limit = 100) {
   if (!GIPHY_API_KEY) {
     console.log('Giphy API key not configured');
     return [];
   }
 
-  try {
-    const url = new URL(`${GIPHY_BASE_URL}/search`);
-    url.searchParams.set('api_key', GIPHY_API_KEY);
-    url.searchParams.set('q', query);
-    url.searchParams.set('limit', limit.toString());
-    url.searchParams.set('rating', 'pg-13');
-    url.searchParams.set('lang', 'en');
+  const allResults = [];
+  const perPage = 50; // Giphy max per request
+  const pagesNeeded = Math.ceil(limit / perPage);
 
-    console.log(`Fetching from Giphy: "${query}"`);
-    const response = await fetch(url.toString());
-
-    if (!response.ok) {
-      console.error(`Giphy API error: ${response.status}`);
-      return [];
+  for (let page = 0; page < pagesNeeded; page++) {
+    if (giphyCalls >= MAX_GIPHY_CALLS) {
+      console.log('Giphy rate limit reached for this session');
+      break;
     }
 
-    giphyCalls++;
-    const data = await response.json();
+    try {
+      const offset = page * perPage;
+      const url = new URL(`${GIPHY_BASE_URL}/search`);
+      url.searchParams.set('api_key', GIPHY_API_KEY);
+      url.searchParams.set('q', query);
+      url.searchParams.set('limit', perPage.toString());
+      url.searchParams.set('offset', offset.toString());
+      url.searchParams.set('rating', 'pg-13');
+      url.searchParams.set('lang', 'en');
 
-    return data.data.map(gif => ({
-      id: gif.id,
-      source: 'giphy',
-      title: gif.title || query,
-      originalUrl: gif.images.original?.url,
-      previewUrl: gif.images.preview_gif?.url || gif.images.downsized?.url,
-      width: parseInt(gif.images.original?.width || 0),
-      height: parseInt(gif.images.original?.height || 0),
-      tags: extractTags(gif),
-      fileSize: parseInt(gif.images.original?.size || 0)
-    }));
-  } catch (error) {
-    console.error(`Giphy fetch error: ${error.message}`);
-    return [];
+      console.log(`Fetching from Giphy: "${query}" (page ${page + 1}/${pagesNeeded})`);
+      const response = await fetch(url.toString());
+
+      if (!response.ok) {
+        console.error(`Giphy API error: ${response.status}`);
+        break;
+      }
+
+      giphyCalls++;
+      const data = await response.json();
+
+      const pageResults = data.data.map(gif => ({
+        id: gif.id,
+        source: 'giphy',
+        title: gif.title || query,
+        originalUrl: gif.images.original?.url,
+        previewUrl: gif.images.preview_gif?.url || gif.images.downsized?.url,
+        width: parseInt(gif.images.original?.width || 0),
+        height: parseInt(gif.images.original?.height || 0),
+        tags: extractTags(gif),
+        fileSize: parseInt(gif.images.original?.size || 0)
+      }));
+
+      allResults.push(...pageResults);
+
+      // Stop if we got fewer results than requested (no more available)
+      if (pageResults.length < perPage) {
+        break;
+      }
+    } catch (error) {
+      console.error(`Giphy fetch error: ${error.message}`);
+      break;
+    }
   }
+
+  return allResults.slice(0, limit);
 }
 
 /**
@@ -207,7 +237,7 @@ async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
     return null;
   }
 
-  // Check for duplicates (skip if force redownload)
+  // Check for duplicates by ID (skip if force redownload)
   if (!skipDupeCheck && gifExists(gif.source, gif.id)) {
     return null;
   }
@@ -242,6 +272,13 @@ async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
       return null;
     }
 
+    // Compute content hash and check for duplicates
+    const contentHash = computeContentHash(buffer);
+    if (!skipDupeCheck && contentHashExists(contentHash)) {
+      console.log(`Skipping ${gif.id}: duplicate content (identical to cached GIF)`);
+      return null;
+    }
+
     // Write to disk
     fs.writeFileSync(localPath, buffer);
 
@@ -260,6 +297,7 @@ async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
       width: width,
       height: height,
       fileSize: actualSize,
+      contentHash: contentHash,
       searchQuery: searchQuery
     };
   } catch (error) {
@@ -269,107 +307,92 @@ async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
 }
 
 /**
- * Fetch trending GIFs (fallback when queue is empty)
+ * Fetch trending GIFs from Giphy (fallback when queue is empty)
  */
-async function fetchTrending() {
-  console.log('Fetching trending GIFs...');
+async function fetchTrending(limit = MAX_GIFS_PER_SEARCH) {
+  console.log('Fetching trending GIFs from Giphy...');
 
-  const results = [];
+  if (!GIPHY_API_KEY) {
+    console.log('Giphy API key not configured');
+    return [];
+  }
 
-  // Fetch trending from Giphy
-  if (giphyCalls < MAX_GIPHY_CALLS && GIPHY_API_KEY) {
+  const allResults = [];
+  const perPage = 50; // Giphy max per request
+  const pagesNeeded = Math.ceil(limit / perPage);
+
+  for (let page = 0; page < pagesNeeded; page++) {
+    if (giphyCalls >= MAX_GIPHY_CALLS) {
+      console.log('Giphy rate limit reached for this session');
+      break;
+    }
+
     try {
+      const offset = page * perPage;
       const url = new URL(`${GIPHY_BASE_URL}/trending`);
       url.searchParams.set('api_key', GIPHY_API_KEY);
-      url.searchParams.set('limit', '50');
+      url.searchParams.set('limit', perPage.toString());
+      url.searchParams.set('offset', offset.toString());
       url.searchParams.set('rating', 'pg-13');
 
+      console.log(`Fetching trending (page ${page + 1}/${pagesNeeded})`);
       const response = await fetch(url.toString());
-      if (response.ok) {
-        giphyCalls++;
-        const data = await response.json();
 
-        for (const gif of data.data) {
-          results.push({
-            id: gif.id,
-            source: 'giphy',
-            title: gif.title || 'Trending',
-            originalUrl: gif.images.original?.url,
-            previewUrl: gif.images.preview_gif?.url,
-            width: parseInt(gif.images.original?.width || 0),
-            height: parseInt(gif.images.original?.height || 0),
-            tags: extractTags(gif),
-            fileSize: parseInt(gif.images.original?.size || 0)
-          });
-        }
+      if (!response.ok) {
+        console.error(`Giphy trending error: ${response.status}`);
+        break;
+      }
+
+      giphyCalls++;
+      const data = await response.json();
+
+      const pageResults = data.data.map(gif => ({
+        id: gif.id,
+        source: 'giphy',
+        title: gif.title || 'Trending',
+        originalUrl: gif.images.original?.url,
+        previewUrl: gif.images.preview_gif?.url || gif.images.downsized?.url,
+        width: parseInt(gif.images.original?.width || 0),
+        height: parseInt(gif.images.original?.height || 0),
+        tags: extractTags(gif),
+        fileSize: parseInt(gif.images.original?.size || 0)
+      }));
+
+      allResults.push(...pageResults);
+
+      // Stop if we got fewer results than requested (no more available)
+      if (pageResults.length < perPage) {
+        break;
       }
     } catch (error) {
       console.error(`Giphy trending error: ${error.message}`);
+      break;
     }
   }
 
-  // Fetch featured from Tenor
-  if (tenorCalls < MAX_TENOR_CALLS && TENOR_API_KEY) {
-    try {
-      const url = new URL(`${TENOR_BASE_URL}/featured`);
-      url.searchParams.set('key', TENOR_API_KEY);
-      url.searchParams.set('limit', '50');
-      url.searchParams.set('media_filter', 'gif,tinygif');
-      url.searchParams.set('contentfilter', 'low');
-
-      const response = await fetch(url.toString());
-      if (response.ok) {
-        tenorCalls++;
-        const data = await response.json();
-
-        for (const gif of data.results) {
-          results.push({
-            id: gif.id,
-            source: 'tenor',
-            title: gif.title || 'Trending',
-            originalUrl: gif.media_formats?.gif?.url,
-            previewUrl: gif.media_formats?.tinygif?.url,
-            width: gif.media_formats?.gif?.dims?.[0] || 0,
-            height: gif.media_formats?.gif?.dims?.[1] || 0,
-            tags: gif.tags || [],
-            fileSize: gif.media_formats?.gif?.size || 0
-          });
-        }
-      }
-    } catch (error) {
-      console.error(`Tenor featured error: ${error.message}`);
-    }
-  }
-
-  return results;
+  return allResults.slice(0, limit);
 }
 
 /**
- * Process a search query
+ * Process a search query - fetches 100 GIFs from Giphy only
  */
 async function processQuery(query) {
   console.log(`\n${'='.repeat(50)}`);
   console.log(`Processing: "${query}"`);
   console.log('='.repeat(50));
 
-  // Fetch from both APIs
+  // Fetch from Giphy only (100 GIFs)
   const giphyResults = await fetchFromGiphy(query, MAX_GIFS_PER_SEARCH);
-  const tenorResults = await fetchFromTenor(query, MAX_GIFS_PER_SEARCH);
 
-  // Combine and shuffle for variety
-  const allGifs = [...giphyResults, ...tenorResults]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, MAX_GIFS_PER_SEARCH);
+  console.log(`Found ${giphyResults.length} GIFs from Giphy`);
 
-  console.log(`Found ${allGifs.length} GIFs from APIs`);
-
-  // Download and cache
+  // Download and cache - keep going until we have 100 downloads
   let downloaded = 0;
   let skipped = 0;
 
-  for (const gif of allGifs) {
+  for (const gif of giphyResults) {
     if (downloaded >= MAX_GIFS_PER_SEARCH) {
-      console.log(`Reached max GIFs per search (${MAX_GIFS_PER_SEARCH})`);
+      console.log(`Reached target: ${MAX_GIFS_PER_SEARCH} GIFs downloaded`);
       break;
     }
 

@@ -28,12 +28,17 @@ function buildKlipyUrl(endpoint) {
 }
 
 // Transform Klipy response to our format
+// Klipy structure: file.hd.gif.url, file.md.gif.url, etc.
 function transformGif(gif, defaultTitle = 'GIF') {
+  const file = gif.file || {};
+  const hd = file.hd || {};
+  const md = file.md || {};
+
   return {
     id: gif.id,
-    url: gif.images?.original?.url || gif.images?.downsized?.url || gif.url,
-    preview: gif.images?.preview?.url || gif.images?.downsized?.url || gif.url,
-    title: gif.title || defaultTitle,
+    url: hd.gif?.url || md.gif?.url || gif.url,
+    preview: md.gif?.url || hd.gif?.url || gif.url,
+    title: gif.title || gif.slug || defaultTitle,
     source: 'klipy',
   };
 }
@@ -51,8 +56,10 @@ async function searchKlipy(query, limit = 20) {
     throw new Error(`Klipy API error: ${response.status}`);
   }
 
-  const data = await response.json();
-  return (data.data || []).map(gif => transformGif(gif, query));
+  const json = await response.json();
+  // Klipy response: { result: true, data: { data: [...] } }
+  const gifs = json.data?.data || [];
+  return gifs.map(gif => transformGif(gif, query));
 }
 
 // Get trending from Klipy
@@ -68,8 +75,10 @@ async function getTrendingKlipy(limit = 20) {
     throw new Error(`Klipy API error: ${response.status}`);
   }
 
-  const data = await response.json();
-  return (data.data || []).map(gif => transformGif(gif, 'Trending'));
+  const json = await response.json();
+  // Klipy response: { result: true, data: { data: [...] } }
+  const gifs = json.data?.data || [];
+  return gifs.map(gif => transformGif(gif, 'Trending'));
 }
 
 export const gifService = {

@@ -151,7 +151,7 @@ export function GameProvider({ children }) {
     // Clear timer when phase changes to something without a timer
     const handlePhaseChangeWithTimer = ({ phase }) => {
       console.log('Phase changed:', phase);
-      if (!['prompt_vote', 'gif_search', 'voting'].includes(phase)) {
+      if (!['prompt_vote', 'gif_search', 'voting', 'presentation', 'round_results'].includes(phase)) {
         dispatch({ type: 'CLEAR_TIMER' });
       }
     };

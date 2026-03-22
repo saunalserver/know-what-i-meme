@@ -163,7 +163,7 @@ export function GifSearch({ onSelect, selectedGif }) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search GIFs or type emoji 😂"
+          placeholder="Search KLIPY"
           className="input pr-20"
         />
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">

@@ -39,6 +39,8 @@ export class GameRoom {
     prompt_vote: 30,
     gif_search: 60,
     voting: 30,
+    presentation: 5,    // Per-meme auto-advance
+    round_results: 8,   // Before next round
   };
 
   startTimer(phase, io, roomCode) {

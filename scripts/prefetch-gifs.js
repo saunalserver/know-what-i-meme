@@ -11,10 +11,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load environment variables (use absolute path for cron compatibility)
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 // Import cache utilities
 import {
@@ -45,8 +45,9 @@ const TENOR_BASE_URL = 'https://tenor.googleapis.com/v2';
 const GIPHY_BASE_URL = 'https://api.giphy.com/v1/gifs';
 
 // Rate limiting (Giphy beta: 100/hour, Tenor: conservative)
-const MAX_GIPHY_CALLS = 100;
+const MAX_GIPHY_CALLS = 96; // Leave buffer for live search
 const MAX_TENOR_CALLS = 50;
+const MAX_QUEUE_ITEMS_PER_RUN = 4; // Process 4 items per run (8 API calls)
 
 // Track API calls this session
 let giphyCalls = 0;
@@ -444,14 +445,18 @@ async function main() {
     console.log(`Queue: ${queue.pending.length} pending, ${queue.completed.length} completed`);
 
     if (queue.pending.length > 0) {
-      // Process first pending item
-      const nextQuery = queue.pending[0];
-      totalDownloaded = await processQuery(nextQuery);
+      // Process multiple queue items per run
+      const itemsToProcess = Math.min(MAX_QUEUE_ITEMS_PER_RUN, queue.pending.length);
+      console.log(`Processing ${itemsToProcess} queue items this run...`);
 
-      // Mark as completed
-      if (totalDownloaded > 0) {
-        markQueueItemCompleted(nextQuery, totalDownloaded);
+      for (let i = 0; i < itemsToProcess; i++) {
+        const nextQuery = queue.pending[i];
+        const downloaded = await processQuery(nextQuery);
+
+        // Mark as completed (even if 0 downloaded - API call was successful)
+        markQueueItemCompleted(nextQuery, downloaded);
         console.log(`Marked "${nextQuery}" as completed`);
+        totalDownloaded += downloaded;
       }
     } else {
       // No pending items, fetch trending

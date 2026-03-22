@@ -14,7 +14,7 @@ export const QUEUE_FILE = '/home/saunalserver/obsidian-vault/nexus/01_PROJECTS/k
 export const MAX_GIFS_PER_SEARCH = 100;
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB (was 5MB)
 export const MIN_DIMENSION = 50; // min 50px (was 100px)
-export const MAX_CACHE_SIZE = 60 * 1024 * 1024 * 1024; // 60GB
+export const MAX_CACHE_SIZE = 240 * 1024 * 1024 * 1024; // 240GB
 
 // Initialize cache files if they don't exist
 export function initializeCache() {

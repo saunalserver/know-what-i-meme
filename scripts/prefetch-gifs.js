@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * GIF Prefetcher Script
- * Runs hourly to fetch and cache GIFs from Giphy and Tenor
+ * Runs hourly to fetch and cache GIFs from Giphy only
  *
  * Usage: node scripts/prefetch-gifs.js [--force] [--query="search term"]
  */
@@ -37,21 +37,17 @@ import {
   GIFS_DIR
 } from './cache-utils.js';
 
-// API Configuration
-const TENOR_API_KEY = process.env.TENOR_API_KEY;
+// API Configuration - Giphy only
 const GIPHY_API_KEY = process.env.GIPHY_API_KEY;
-
-const TENOR_BASE_URL = 'https://tenor.googleapis.com/v2';
 const GIPHY_BASE_URL = 'https://api.giphy.com/v1/gifs';
 
-// Rate limiting (Giphy beta: 100/hour, Tenor: conservative)
-const MAX_GIPHY_CALLS = 96; // Leave buffer for live search
-const MAX_TENOR_CALLS = 50;
-const MAX_QUEUE_ITEMS_PER_RUN = 4; // Process 4 items per run (8 API calls)
+// Rate limiting (Giphy beta: 100/hour)
+const MAX_GIPHY_CALLS_PER_HOUR = 95; // Leave buffer for live search
+const MAX_QUEUE_ITEMS_PER_RUN = 4; // Process 4 items per run (8 API calls max)
+const HOUR_IN_MS = 60 * 60 * 1000;
 
 // Track API calls this session
-let giphyCalls = 0;
-let tenorCalls = 0;
+let giphyCallsThisRun = 0;
 
 // Parse command line args
 const args = process.argv.slice(2);
@@ -72,12 +68,120 @@ if (queryArg) {
 }
 
 /**
+ * Check if we've exceeded hourly rate limit (persists across runs)
+ */
+function checkRateLimit() {
+  const stats = loadStats();
+  const now = Date.now();
+
+  // Initialize rate limit tracking if not exists
+  if (!stats.rateLimit) {
+    stats.rateLimit = {
+      giphyCalls: 0,
+      windowStart: now
+    };
+    saveStats(stats);
+    return { allowed: true, remaining: MAX_GIPHY_CALLS_PER_HOUR };
+  }
+
+  // Reset counter if hour has passed
+  if (now - stats.rateLimit.windowStart >= HOUR_IN_MS) {
+    stats.rateLimit = {
+      giphyCalls: 0,
+      windowStart: now
+    };
+    saveStats(stats);
+    return { allowed: true, remaining: MAX_GIPHY_CALLS_PER_HOUR };
+  }
+
+  const remaining = MAX_GIPHY_CALLS_PER_HOUR - stats.rateLimit.giphyCalls;
+  return {
+    allowed: remaining > 0,
+    remaining: Math.max(0, remaining),
+    resetsIn: HOUR_IN_MS - (now - stats.rateLimit.windowStart)
+  };
+}
+
+/**
+ * Increment rate limit counter
+ */
+function incrementRateLimit() {
+  const stats = loadStats();
+  if (!stats.rateLimit) {
+    stats.rateLimit = { giphyCalls: 0, windowStart: Date.now() };
+  }
+  stats.rateLimit.giphyCalls++;
+  saveStats(stats);
+  giphyCallsThisRun++;
+}
+
+/**
+ * Sleep for ms milliseconds
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch with retry and exponential backoff
+ */
+async function fetchWithRetry(url, maxRetries = 3) {
+  let lastError;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url);
+
+      // Rate limit exceeded
+      if (response.status === 429) {
+        console.log('Rate limit exceeded (429). Stopping for this hour.');
+        return { rateLimited: true };
+      }
+
+      // Client error - don't retry
+      if (response.status >= 400 && response.status < 500) {
+        console.error(`Client error ${response.status} - not retrying`);
+        return { error: `Client error: ${response.status}`, noRetry: true };
+      }
+
+      // Server error - retry with backoff
+      if (response.status >= 500) {
+        const backoff = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+        console.log(`Server error ${response.status}, retrying in ${backoff}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await sleep(backoff);
+        continue;
+      }
+
+      if (!response.ok) {
+        return { error: `HTTP ${response.status}` };
+      }
+
+      return { success: true, response };
+    } catch (error) {
+      lastError = error;
+      const backoff = Math.pow(2, attempt) * 1000;
+      console.log(`Fetch error: ${error.message}, retrying in ${backoff}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await sleep(backoff);
+    }
+  }
+
+  return { error: lastError?.message || 'Max retries exceeded' };
+}
+
+/**
  * Fetch GIFs from Giphy (handles pagination to get up to 100)
  */
 async function fetchFromGiphy(query, limit = 100) {
   if (!GIPHY_API_KEY) {
     console.log('Giphy API key not configured');
-    return [];
+    return { gifs: [], rateLimited: false };
+  }
+
+  // Check rate limit before starting
+  const rateCheck = checkRateLimit();
+  if (!rateCheck.allowed) {
+    console.log(`Rate limit exceeded. Resets in ${Math.round(rateCheck.resetsIn / 60000)} minutes.`);
+    return { gifs: [], rateLimited: true };
   }
 
   const allResults = [];
@@ -85,8 +189,10 @@ async function fetchFromGiphy(query, limit = 100) {
   const pagesNeeded = Math.ceil(limit / perPage);
 
   for (let page = 0; page < pagesNeeded; page++) {
-    if (giphyCalls >= MAX_GIPHY_CALLS) {
-      console.log('Giphy rate limit reached for this session');
+    // Check rate limit before each request
+    const check = checkRateLimit();
+    if (!check.allowed) {
+      console.log(`Rate limit reached. Resets in ${Math.round(check.resetsIn / 60000)} minutes.`);
       break;
     }
 
@@ -100,16 +206,26 @@ async function fetchFromGiphy(query, limit = 100) {
       url.searchParams.set('rating', 'pg-13');
       url.searchParams.set('lang', 'en');
 
-      console.log(`Fetching from Giphy: "${query}" (page ${page + 1}/${pagesNeeded})`);
-      const response = await fetch(url.toString());
+      console.log(`Fetching from Giphy: "${query}" (page ${page + 1}/${pagesNeeded}) [${check.remaining} calls remaining]`);
 
-      if (!response.ok) {
-        console.error(`Giphy API error: ${response.status}`);
+      const result = await fetchWithRetry(url.toString());
+
+      if (result.rateLimited) {
+        return { gifs: allResults, rateLimited: true };
+      }
+
+      if (result.noRetry) {
+        console.error(`Permanent error, stopping: ${result.error}`);
         break;
       }
 
-      giphyCalls++;
-      const data = await response.json();
+      if (!result.success) {
+        console.error(`Failed to fetch: ${result.error}`);
+        break;
+      }
+
+      incrementRateLimit();
+      const data = await result.response.json();
 
       const pageResults = data.data.map(gif => ({
         id: gif.id,
@@ -135,58 +251,7 @@ async function fetchFromGiphy(query, limit = 100) {
     }
   }
 
-  return allResults.slice(0, limit);
-}
-
-/**
- * Fetch GIFs from Tenor
- */
-async function fetchFromTenor(query, limit = 50) {
-  if (tenorCalls >= MAX_TENOR_CALLS) {
-    console.log('Tenor rate limit reached for this session');
-    return [];
-  }
-
-  if (!TENOR_API_KEY) {
-    console.log('Tenor API key not configured');
-    return [];
-  }
-
-  try {
-    const url = new URL(`${TENOR_BASE_URL}/search`);
-    url.searchParams.set('key', TENOR_API_KEY);
-    url.searchParams.set('q', query);
-    url.searchParams.set('limit', limit.toString());
-    url.searchParams.set('media_filter', 'gif,tinygif');
-    url.searchParams.set('contentfilter', 'low');
-    url.searchParams.set('locale', 'en_US');
-
-    console.log(`Fetching from Tenor: "${query}"`);
-    const response = await fetch(url.toString());
-
-    if (!response.ok) {
-      console.error(`Tenor API error: ${response.status}`);
-      return [];
-    }
-
-    tenorCalls++;
-    const data = await response.json();
-
-    return data.results.map(gif => ({
-      id: gif.id,
-      source: 'tenor',
-      title: gif.title || query,
-      originalUrl: gif.media_formats?.gif?.url,
-      previewUrl: gif.media_formats?.tinygif?.url,
-      width: gif.media_formats?.gif?.dims?.[0] || 0,
-      height: gif.media_formats?.gif?.dims?.[1] || 0,
-      tags: gif.tags || [],
-      fileSize: gif.media_formats?.gif?.size || 0
-    }));
-  } catch (error) {
-    console.error(`Tenor fetch error: ${error.message}`);
-    return [];
-  }
+  return { gifs: allResults.slice(0, limit), rateLimited: false };
 }
 
 /**
@@ -218,35 +283,90 @@ function extractTags(gif) {
 }
 
 /**
+ * Add failed download to retry queue
+ */
+function addFailedDownload(gif, searchQuery, error) {
+  const stats = loadStats();
+  if (!stats.failedDownloads) {
+    stats.failedDownloads = [];
+  }
+
+  // Check if already in queue
+  const existing = stats.failedDownloads.find(f => f.id === gif.id && f.source === gif.source);
+  if (existing) {
+    existing.attempts++;
+    existing.lastError = error;
+    existing.lastAttempt = new Date().toISOString();
+  } else {
+    stats.failedDownloads.push({
+      id: gif.id,
+      source: gif.source,
+      originalUrl: gif.originalUrl,
+      previewUrl: gif.previewUrl,
+      title: gif.title,
+      width: gif.width,
+      height: gif.height,
+      fileSize: gif.fileSize,
+      tags: gif.tags,
+      searchQuery: searchQuery,
+      attempts: 1,
+      lastError: error,
+      lastAttempt: new Date().toISOString()
+    });
+  }
+
+  // Remove items with too many attempts (max 3)
+  stats.failedDownloads = stats.failedDownloads.filter(f => f.attempts < 3);
+  saveStats(stats);
+}
+
+/**
+ * Get failed downloads for retry
+ */
+function getFailedDownloads() {
+  const stats = loadStats();
+  return stats.failedDownloads || [];
+}
+
+/**
+ * Clear failed download from queue
+ */
+function clearFailedDownload(gifId, source) {
+  const stats = loadStats();
+  if (stats.failedDownloads) {
+    stats.failedDownloads = stats.failedDownloads.filter(f => !(f.id === gifId && f.source === source));
+    saveStats(stats);
+  }
+}
+
+/**
  * Download a GIF to local storage
  */
 async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
   // Validate GIF
   if (!gif.originalUrl) {
-    return null;
+    return { success: false, reason: 'no_url' };
   }
 
   // Check dimensions
   if (gif.width < MIN_DIMENSION || gif.height < MIN_DIMENSION) {
-    console.log(`Skipping ${gif.id}: too small (${gif.width}x${gif.height})`);
-    return null;
+    return { success: false, reason: 'too_small' };
   }
 
   // Check file size (if known)
   if (gif.fileSize > MAX_FILE_SIZE) {
-    console.log(`Skipping ${gif.id}: too large (${Math.round(gif.fileSize / 1024)}KB)`);
-    return null;
+    return { success: false, reason: 'too_large' };
   }
 
   // Check for duplicates by ID (skip if force redownload)
   if (!skipDupeCheck && gifExists(gif.source, gif.id)) {
-    return null;
+    return { success: false, reason: 'duplicate_id' };
   }
 
   // Check storage space
   if (!hasSpaceForMore(gif.fileSize || 500 * 1024)) {
     console.log('Cache storage limit reached');
-    return null;
+    return { success: false, reason: 'storage_full' };
   }
 
   try {
@@ -259,8 +379,9 @@ async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
     const response = await fetch(gif.originalUrl);
 
     if (!response.ok) {
-      console.error(`Download failed: ${response.status}`);
-      return null;
+      const error = `HTTP ${response.status}`;
+      console.error(`Download failed: ${error}`);
+      return { success: false, reason: 'download_failed', error, gif };
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -269,15 +390,13 @@ async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
 
     // Double-check size after download
     if (actualSize > MAX_FILE_SIZE) {
-      console.log(`Skipping ${gif.id}: downloaded file too large (${Math.round(actualSize / 1024)}KB)`);
-      return null;
+      return { success: false, reason: 'too_large_after_download' };
     }
 
     // Compute content hash and check for duplicates
     const contentHash = computeContentHash(buffer);
     if (!skipDupeCheck && contentHashExists(contentHash)) {
-      console.log(`Skipping ${gif.id}: duplicate content (identical to cached GIF)`);
-      return null;
+      return { success: false, reason: 'duplicate_content' };
     }
 
     // Write to disk
@@ -288,22 +407,25 @@ async function downloadGif(gif, searchQuery, skipDupeCheck = false) {
     const height = gif.height || 200;
 
     return {
-      id: gif.id,
-      source: gif.source,
-      title: gif.title,
-      localPath: localPath,
-      originalUrl: gif.originalUrl,
-      previewUrl: gif.previewUrl || gif.originalUrl,
-      tags: gif.tags,
-      width: width,
-      height: height,
-      fileSize: actualSize,
-      contentHash: contentHash,
-      searchQuery: searchQuery
+      success: true,
+      data: {
+        id: gif.id,
+        source: gif.source,
+        title: gif.title,
+        localPath: localPath,
+        originalUrl: gif.originalUrl,
+        previewUrl: gif.previewUrl || gif.originalUrl,
+        tags: gif.tags,
+        width: width,
+        height: height,
+        fileSize: actualSize,
+        contentHash: contentHash,
+        searchQuery: searchQuery
+      }
     };
   } catch (error) {
     console.error(`Error downloading ${gif.id}: ${error.message}`);
-    return null;
+    return { success: false, reason: 'exception', error: error.message, gif };
   }
 }
 
@@ -315,16 +437,24 @@ async function fetchTrending(limit = MAX_GIFS_PER_SEARCH) {
 
   if (!GIPHY_API_KEY) {
     console.log('Giphy API key not configured');
-    return [];
+    return { gifs: [], rateLimited: false };
+  }
+
+  // Check rate limit before starting
+  const rateCheck = checkRateLimit();
+  if (!rateCheck.allowed) {
+    console.log(`Rate limit exceeded. Resets in ${Math.round(rateCheck.resetsIn / 60000)} minutes.`);
+    return { gifs: [], rateLimited: true };
   }
 
   const allResults = [];
-  const perPage = 50; // Giphy max per request
+  const perPage = 50;
   const pagesNeeded = Math.ceil(limit / perPage);
 
   for (let page = 0; page < pagesNeeded; page++) {
-    if (giphyCalls >= MAX_GIPHY_CALLS) {
-      console.log('Giphy rate limit reached for this session');
+    const check = checkRateLimit();
+    if (!check.allowed) {
+      console.log(`Rate limit reached. Resets in ${Math.round(check.resetsIn / 60000)} minutes.`);
       break;
     }
 
@@ -336,16 +466,21 @@ async function fetchTrending(limit = MAX_GIFS_PER_SEARCH) {
       url.searchParams.set('offset', offset.toString());
       url.searchParams.set('rating', 'pg-13');
 
-      console.log(`Fetching trending (page ${page + 1}/${pagesNeeded})`);
-      const response = await fetch(url.toString());
+      console.log(`Fetching trending (page ${page + 1}/${pagesNeeded}) [${check.remaining} calls remaining]`);
 
-      if (!response.ok) {
-        console.error(`Giphy trending error: ${response.status}`);
+      const result = await fetchWithRetry(url.toString());
+
+      if (result.rateLimited) {
+        return { gifs: allResults, rateLimited: true };
+      }
+
+      if (!result.success) {
+        console.error(`Failed to fetch trending: ${result.error}`);
         break;
       }
 
-      giphyCalls++;
-      const data = await response.json();
+      incrementRateLimit();
+      const data = await result.response.json();
 
       const pageResults = data.data.map(gif => ({
         id: gif.id,
@@ -361,7 +496,6 @@ async function fetchTrending(limit = MAX_GIFS_PER_SEARCH) {
 
       allResults.push(...pageResults);
 
-      // Stop if we got fewer results than requested (no more available)
       if (pageResults.length < perPage) {
         break;
       }
@@ -371,11 +505,12 @@ async function fetchTrending(limit = MAX_GIFS_PER_SEARCH) {
     }
   }
 
-  return allResults.slice(0, limit);
+  return { gifs: allResults.slice(0, limit), rateLimited: false };
 }
 
 /**
  * Process a search query - fetches 100 GIFs from Giphy only
+ * @returns {Object} { downloaded, rateLimited }
  */
 async function processQuery(query) {
   console.log(`\n${'='.repeat(50)}`);
@@ -383,50 +518,69 @@ async function processQuery(query) {
   console.log('='.repeat(50));
 
   // Fetch from Giphy only (100 GIFs)
-  const giphyResults = await fetchFromGiphy(query, MAX_GIFS_PER_SEARCH);
+  const fetchResult = await fetchFromGiphy(query, MAX_GIFS_PER_SEARCH);
 
-  console.log(`Found ${giphyResults.length} GIFs from Giphy`);
+  if (fetchResult.rateLimited) {
+    console.log('Rate limited during fetch - stopping');
+    return { downloaded: 0, rateLimited: true };
+  }
+
+  console.log(`Found ${fetchResult.gifs.length} GIFs from Giphy`);
 
   // Download and cache - keep going until we have 100 downloads
   let downloaded = 0;
   let skipped = 0;
+  let failed = 0;
 
-  for (const gif of giphyResults) {
+  for (const gif of fetchResult.gifs) {
     if (downloaded >= MAX_GIFS_PER_SEARCH) {
       console.log(`Reached target: ${MAX_GIFS_PER_SEARCH} GIFs downloaded`);
       break;
     }
 
-    const cached = await downloadGif(gif, query, forceRedownload);
-    if (cached) {
-      addGifToIndex(cached);
+    const result = await downloadGif(gif, query, forceRedownload);
+
+    if (result.success) {
+      addGifToIndex(result.data);
       downloaded++;
+    } else if (result.reason === 'download_failed' || result.reason === 'exception') {
+      // Queue for retry on next run
+      addFailedDownload(gif, query, result.error || result.reason);
+      failed++;
     } else {
       skipped++;
     }
   }
 
-  console.log(`Downloaded: ${downloaded}, Skipped: ${skipped}`);
+  console.log(`Downloaded: ${downloaded}, Skipped: ${skipped}, Failed (queued): ${failed}`);
 
-  return downloaded;
+  return { downloaded, rateLimited: false };
 }
 
 /**
  * Main execution
  */
 async function main() {
-  console.log('\nGIF Prefetcher');
+  console.log('\nGIF Prefetcher (Giphy only)');
   console.log('='.repeat(50));
   console.log(`Started at: ${new Date().toISOString()}`);
 
   // Initialize cache
   initializeCache();
 
-  // Check API keys
-  if (!GIPHY_API_KEY && !TENOR_API_KEY) {
-    console.error('ERROR: No API keys configured!');
-    console.error('Set GIPHY_API_KEY and/or TENOR_API_KEY in .env');
+  // Check API key
+  if (!GIPHY_API_KEY) {
+    console.error('ERROR: GIPHY_API_KEY not configured!');
+    console.error('Set GIPHY_API_KEY in .env');
     process.exit(1);
+  }
+
+  // Check rate limit at start
+  const rateCheck = checkRateLimit();
+  console.log(`Rate limit: ${rateCheck.remaining}/${MAX_GIPHY_CALLS_PER_HOUR} calls remaining`);
+  if (!rateCheck.allowed) {
+    console.log(`Rate limit exceeded. Try again in ${Math.round(rateCheck.resetsIn / 60000)} minutes.`);
+    process.exit(0);
   }
 
   // Get current health
@@ -434,53 +588,97 @@ async function main() {
   console.log(`Cache: ${healthBefore.totalGifs} GIFs, ${healthBefore.storageUsedMB}MB used`);
 
   let totalDownloaded = 0;
+  let wasRateLimited = false;
+
+  // First, retry any failed downloads from previous runs
+  const failedDownloads = getFailedDownloads();
+  if (failedDownloads.length > 0) {
+    console.log(`\nRetrying ${failedDownloads.length} failed downloads...`);
+    let retried = 0;
+    let recovered = 0;
+
+    for (const failed of failedDownloads) {
+      const result = await downloadGif(failed, failed.searchQuery, false);
+
+      if (result.success) {
+        addGifToIndex(result.data);
+        clearFailedDownload(failed.id, failed.source);
+        recovered++;
+        totalDownloaded++;
+      } else {
+        // Will be re-queued with incremented attempt count
+        addFailedDownload(failed, failed.searchQuery, result.error || result.reason);
+      }
+      retried++;
+    }
+
+    console.log(`Retry complete: ${recovered}/${retried} recovered`);
+  }
 
   // Handle forced query
   if (forcedQuery) {
     console.log(`\nForced query mode: "${forcedQuery}"`);
-    totalDownloaded = await processQuery(forcedQuery);
+    const result = await processQuery(forcedQuery);
+    totalDownloaded += result.downloaded;
+    wasRateLimited = result.rateLimited;
   } else {
     // Parse queue
     const queue = parseQueueFile();
     console.log(`Queue: ${queue.pending.length} pending, ${queue.completed.length} completed`);
 
-    if (queue.pending.length > 0) {
+    if (queue.pending.length > 0 && !wasRateLimited) {
       // Process multiple queue items per run
       const itemsToProcess = Math.min(MAX_QUEUE_ITEMS_PER_RUN, queue.pending.length);
       console.log(`Processing ${itemsToProcess} queue items this run...`);
 
       for (let i = 0; i < itemsToProcess; i++) {
+        if (wasRateLimited) {
+          console.log('Rate limited - stopping queue processing');
+          break;
+        }
+
         const nextQuery = queue.pending[i];
-        const downloaded = await processQuery(nextQuery);
+        const result = await processQuery(nextQuery);
 
         // Mark as completed (even if 0 downloaded - API call was successful)
-        markQueueItemCompleted(nextQuery, downloaded);
-        console.log(`Marked "${nextQuery}" as completed`);
-        totalDownloaded += downloaded;
+        if (!result.rateLimited) {
+          markQueueItemCompleted(nextQuery, result.downloaded);
+          console.log(`Marked "${nextQuery}" as completed`);
+        }
+        totalDownloaded += result.downloaded;
+        wasRateLimited = result.rateLimited;
       }
-    } else {
+    } else if (queue.pending.length === 0) {
       // No pending items, fetch trending
       console.log('\nNo pending items in queue, fetching trending...');
-      const trendingGifs = await fetchTrending();
-      console.log(`Found ${trendingGifs.length} trending GIFs`);
+      const trendingResult = await fetchTrending();
 
-      let downloaded = 0;
-      for (const gif of trendingGifs) {
-        if (downloaded >= MAX_GIFS_PER_SEARCH) break;
+      if (trendingResult.rateLimited) {
+        console.log('Rate limited during trending fetch');
+      } else {
+        console.log(`Found ${trendingResult.gifs.length} trending GIFs`);
 
-        const cached = await downloadGif(gif, 'trending');
-        if (cached) {
-          addGifToIndex(cached);
-          downloaded++;
+        let downloaded = 0;
+        for (const gif of trendingResult.gifs) {
+          if (downloaded >= MAX_GIFS_PER_SEARCH) break;
+
+          const result = await downloadGif(gif, 'trending');
+          if (result.success) {
+            addGifToIndex(result.data);
+            downloaded++;
+          }
         }
+        totalDownloaded = downloaded;
+        console.log(`Downloaded ${downloaded} trending GIFs`);
       }
-      totalDownloaded = downloaded;
-      console.log(`Downloaded ${downloaded} trending GIFs`);
     }
   }
 
   // Update stats
   updateQueueStats();
+
+  // Get final rate limit status
+  const finalRateCheck = checkRateLimit();
 
   // Final health check
   const healthAfter = getCacheHealth();
@@ -489,12 +687,23 @@ async function main() {
   console.log(`  Downloaded this run: ${totalDownloaded}`);
   console.log(`  Total cached: ${healthAfter.totalGifs} GIFs`);
   console.log(`  Storage: ${healthAfter.storageUsedMB}MB / ${healthAfter.maxStorageMB}MB (${healthAfter.percentUsed}%)`);
-  console.log(`  API calls: Giphy ${giphyCalls}/${MAX_GIPHY_CALLS}, Tenor ${tenorCalls}/${MAX_TENOR_CALLS}`);
+  console.log(`  API calls this run: ${giphyCallsThisRun}`);
+  console.log(`  Rate limit: ${finalRateCheck.remaining}/${MAX_GIPHY_CALLS_PER_HOUR} remaining`);
+
+  // Show failed downloads queue status
+  const remainingFailed = getFailedDownloads();
+  if (remainingFailed.length > 0) {
+    console.log(`  Failed downloads pending retry: ${remainingFailed.length}`);
+  }
 
   // Update run counter
   const stats = loadStats();
   stats.runsCompleted = (stats.runsCompleted || 0) + 1;
   saveStats(stats);
+
+  if (wasRateLimited) {
+    console.log(`\nRate limited - will continue next hour`);
+  }
 
   console.log(`\nCompleted at: ${new Date().toISOString()}`);
 }

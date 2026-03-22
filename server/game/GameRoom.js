@@ -369,6 +369,9 @@ export class GameRoom {
       playerCount: this.players.length,
       isFinalRound: this.isFinalRound(),
       pointsMultiplier: this.getPointsMultiplier(),
+      // Timer state for reconnection sync
+      timerSeconds: this.timerSeconds,
+      timerPhase: this.timerPhase,
     };
   }
 }

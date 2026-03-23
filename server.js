@@ -41,12 +41,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// API Routes
-app.get('/api/health', (req, res) => {
+// API Routes (with base path support for production)
+const API_BASE = process.env.NODE_ENV === 'production' ? '/games/kwim' : '';
+
+app.get(`${API_BASE}/api/health`, (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/gif/search', async (req, res) => {
+app.get(`${API_BASE}/api/gif/search`, async (req, res) => {
   const { q, limit = 20, exclude } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'Query parameter "q" is required' });
@@ -104,7 +106,67 @@ app.get('/api/gif/usage', (req, res) => {
 });
 
 // Klipy GIF Browser
-app.get('/klipy-browser', (req, res) => {
+// API Routes (with /games/kwim prefix)
+app.get('/games/kwim/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/games/kwim/api/gif/search', async (req, res) => {
+  const { q, limit = 20, exclude } = req.query;
+  if (!q) {
+    return res.status(400).json({ error: 'Query parameter "q" is required' });
+  }
+  try {
+    const excludeIds = exclude ? exclude.split(',') : [];
+    const gifs = await gifService.search(q, parseInt(limit), excludeIds);
+    res.json(gifs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/games/kwim/api/gif/trending', async (req, res) => {
+  const { limit = 20, fresh = false } = req.query;
+  try {
+    const gifs = await gifService.getTrending(parseInt(limit), fresh === 'true');
+    res.json(gifs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/games/kwim/api/gif/random', async (req, res) => {
+  const { limit = 20 } = req.query;
+  try {
+    const gifs = await gifService.getRandom(parseInt(limit));
+    res.json(gifs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/games/kwim/api/gif/category/:categoryId', async (req, res) => {
+  const { categoryId } = req.params;
+  const { limit = 20 } = req.query;
+  try {
+    const gifs = await gifService.getByCategory(categoryId, parseInt(limit));
+    res.json(gifs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/games/kwim/api/gif/categories', (req, res) => {
+  res.json(gifService.getCategories());
+});
+
+app.get('/games/kwim/api/gif/emoji-map', (req, res) => {
+  res.json(gifService.getEmojiMap());
+});
+
+app.get('/games/kwim/api/gif/usage', (req, res) => {
+  res.json(gifService.getUsageStats());
+});
   res.send(`
 <!DOCTYPE html>
 <html lang="en">

@@ -24,7 +24,7 @@ function HostLobby() {
   // Always use HTTPS URL so camera feature works for players
   useEffect(() => {
     if (gameState?.code) {
-      const joinUrl = `https://YOUR_SERVER_IP:8444/join/${gameState.code}`
+      const joinUrl = `https://saunalserver.xyz/kwim/join/${gameState.code}`
       QRCode.toDataURL(joinUrl, { width: 300, margin: 2 })
         .then(setQrCode)
         .catch(console.error)

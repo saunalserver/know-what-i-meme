@@ -119,16 +119,30 @@ export function GifSearch({ onSelect, selectedGif }) {
     }
   }, [])
 
-  // Debounce search
+  // Debounce search (2 seconds)
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (query) {
+      if (query.length >= 2) {
         searchGifs(query)
       }
-    }, 300)
+    }, 2000)
 
     return () => clearTimeout(timer)
   }, [query, searchGifs])
+
+  // Manual search trigger
+  const handleManualSearch = () => {
+    if (query.length >= 2) {
+      searchGifs(query)
+    }
+  }
+
+  // Handle Enter key for manual search
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && query.length >= 2) {
+      searchGifs(query)
+    }
+  }
 
   const handleSelect = (gif) => {
     seenGifIds.add(gif.id)
@@ -157,27 +171,35 @@ export function GifSearch({ onSelect, selectedGif }) {
   return (
     <div className="w-full flex flex-col h-full">
       {/* Search Input */}
-      <div className="relative mb-3">
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search KLIPY"
-          className="input pr-20"
-        />
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-          <button
-            onClick={handleShuffle}
-            className="p-1 text-text-muted hover:text-accent transition-colors"
-            title="Shuffle / Get new GIFs"
-          >
-            🎲
-          </button>
-          <span className="text-text-muted">
-            {loading ? '⏳' : '🔍'}
-          </span>
+      <div className="relative mb-3 flex gap-2">
+        <div className="relative flex-1">
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Search KLIPY (2+ chars)"
+            className="input w-full pr-10"
+          />
+          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+            <button
+              onClick={handleShuffle}
+              className="p-1 text-text-muted hover:text-accent transition-colors"
+              title="Shuffle / Get new GIFs"
+            >
+              🎲
+            </button>
+          </div>
         </div>
+        <button
+          onClick={handleManualSearch}
+          disabled={query.length < 2 || loading}
+          className="px-4 py-2 bg-accent text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
+          title="Search (or press Enter)"
+        >
+          {loading ? '⏳' : '🔍'}
+        </button>
       </div>
 
       {/* Category Buttons */}

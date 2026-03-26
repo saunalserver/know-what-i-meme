@@ -1,16 +1,36 @@
-# React + Vite
+# Know What I Meme
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A real-time, Jackbox-style multiplayer party game where friends compete to find the perfect GIF for ridiculous prompts.
 
-Currently, two official plugins are available:
+## 🎮 How to Play
+1. **Create a Room**: The host creates a game room and shares the unique 4-character room code.
+2. **Join the Fun**: Players join from their own devices by entering the room code and selecting a profile.
+3. **Vote on Prompts**: Players vote on which ridiculous prompt to use for the round.
+4. **GIF Search**: Use the integrated Klipy-powered search to find the perfect GIF that matches the chosen prompt.
+5. **Vote for the Best**: Review everyone's submissions anonymously and vote for your favorite meme.
+6. **Win the Game**: Accumulate points across multiple rounds to be crowned the ultimate meme master!
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ✨ Key Features
+- **Real-time Gameplay**: Powered by Socket.io for instantaneous updates across all devices.
+- **Robust Reconnection**: Interrupted sessions? Players can seamlessly rejoin active games without losing their state.
+- **Safari Optimized**: Features hardware-accelerated animations and specialized layout fixes for a smooth experience on iOS and macOS devices.
+- **Integrated GIF Browser**: Optimized Klipy API integration for fast, relevant GIF searching.
+- **Mobile-First Design**: Responsive interface built with React and TailwindCSS, perfect for phone-as-a-controller gameplay.
 
-## React Compiler
+## 🛠️ Tech Stack
+- **Frontend**: React, TailwindCSS, Framer Motion, Lucide React
+- **Backend**: Node.js, Express, Socket.io
+- **API**: Klipy GIF API
+- **Deployment**: Production-ready with support for path-based routing (e.g., `/kwim/`)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 🚀 Quick Start
+1. **Clone the repository**
+2. **Install dependencies**: `npm install`
+3. **Configure environment**: Create a `.env` file with your `KLIPY_API_KEY`.
+4. **Start development**:
+   - Server: `npm run dev:server` (Port 3002)
+   - Frontend: `npm run dev` (Port 5173)
+5. **Access**: Open `http://localhost:5173` in your browser.
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 🛡️ License
+MIT

@@ -4,16 +4,52 @@ import { motion } from 'framer-motion'
 import { useGame } from '../context/GameContext'
 import CameraModal from '../components/CameraModal'
 
+// LocalStorage key for session (must match GameContext)
+const STORAGE_KEY = 'kwim_player_session'
+
+// Load player session from localStorage
+const loadPlayerSession = () => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY)
+    if (!data) return null
+    const session = JSON.parse(data)
+    // Only restore sessions from the last 30 minutes
+    if (Date.now() - session.timestamp > 30 * 60 * 1000) {
+      localStorage.removeItem(STORAGE_KEY)
+      return null
+    }
+    return session
+  } catch (e) {
+    return null
+  }
+}
+
 function PlayerJoin() {
   const navigate = useNavigate()
   const { code: urlCode } = useParams()
-  const { joinRoom, player, gameState, error, clearError, isConnected } = useGame()
+  const { joinRoom, rejoinRoom, player, gameState, error, clearError, isConnected } = useGame()
   const [code, setCode] = useState(urlCode || '')
   const [name, setName] = useState('')
   const [photoUrl, setPhotoUrl] = useState('')
   const [photoPreview, setPhotoPreview] = useState(null)
   const [isJoining, setIsJoining] = useState(false)
   const [showCamera, setShowCamera] = useState(false)
+  const [rejoinAttempted, setRejoinAttempted] = useState(false)
+
+  // Auto-rejoin on mount if session exists
+  useEffect(() => {
+    if (!isConnected || rejoinAttempted) return
+
+    const session = loadPlayerSession()
+    if (session && session.code) {
+      console.log('🔄 Found saved session, attempting rejoin:', session.code)
+      setRejoinAttempted(true)
+      setIsJoining(true)
+      rejoinRoom(session.code, session.playerId)
+    } else {
+      setRejoinAttempted(true)
+    }
+  }, [isConnected, rejoinAttempted, rejoinRoom])
 
   // Pre-fill code from URL
   useEffect(() => {
@@ -48,6 +84,10 @@ function PlayerJoin() {
   useEffect(() => {
     if (error) {
       setIsJoining(false)
+      // Clear the saved session on error so user can try fresh
+      try {
+        localStorage.removeItem(STORAGE_KEY)
+      } catch (e) {}
     }
   }, [error])
 

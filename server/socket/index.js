@@ -116,6 +116,47 @@ export function setupSocketHandlers(io) {
       }
     });
 
+    // Player rejoins after disconnect (updates socket.id for existing player)
+    socket.on('player:rejoin', ({ code, playerId }) => {
+      try {
+        code = code.toUpperCase();
+
+        if (!gameStore.hasRoom(code)) {
+          return socket.emit('room:error', { message: 'Room not found' });
+        }
+
+        const room = gameStore.getRoom(code);
+
+        // Find the player by their old ID
+        const player = room.players.find(p => p.id === playerId);
+        if (!player) {
+          return socket.emit('room:error', { message: 'Player not found in room' });
+        }
+
+        // Update player's socket ID to the new one
+        const oldId = player.id;
+        player.id = socket.id;
+        currentRoom = code;
+        isHost = false;
+        socket.join(code);
+
+        console.log(`🔄 Player "${player.name}" rejoined room ${code}: ${oldId} -> ${socket.id}`);
+
+        socket.emit('room:joined', {
+          player: player.toJSON(),
+          gameState: room.toJSON(),
+        });
+
+        // Notify everyone of the reconnection
+        io.to(code).emit('players:update', {
+          players: room.players.map(p => p.toJSON()),
+          gameState: room.toJSON(),
+        });
+      } catch (error) {
+        socket.emit('room:error', { message: error.message });
+      }
+    });
+
     // ============================================
     // GAME FLOW HANDLERS
     // ============================================

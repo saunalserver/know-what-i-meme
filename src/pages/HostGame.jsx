@@ -463,9 +463,9 @@ function HostGame() {
                     <motion.div
                       animate={{ scale: [1, 1.05, 1] }}
                       transition={{ duration: 1, repeat: Infinity }}
-                      className="mb-8"
+                      className="flex flex-col items-center mb-8"
                     >
-                      <Avatar player={winner} size="2xl" className="mx-auto mb-4" />
+                      <Avatar player={winner} size="2xl" className="mb-4" />
                       <h3 className="text-4xl text-white font-bold">{winner.name}</h3>
                       <p className="text-2xl text-success mt-2">{winner.score} points</p>
                     </motion.div>

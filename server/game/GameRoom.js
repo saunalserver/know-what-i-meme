@@ -41,6 +41,7 @@ export class GameRoom {
     voting: 30,
     presentation: 5,    // Per-meme auto-advance
     round_results: 8,   // Before next round
+    leaderboard: 10,    // Mid-game leaderboard
   };
 
   startTimer(phase, io, roomCode) {
@@ -117,6 +118,15 @@ export class GameRoom {
       io.to(roomCode).emit('game:state', this.toJSON());
       io.to(roomCode).emit('game:phase', { phase: 'round_results' });
       io.to(roomCode).emit('round:results', { results });
+    } else if (phase === 'leaderboard') {
+      // Auto-advance to next round from leaderboard
+      this.currentRound++;
+      this.phase = 'prompt_vote';
+      this.preparePromptVoting();
+      io.to(roomCode).emit('game:state', this.toJSON());
+      io.to(roomCode).emit('game:phase', { phase: 'prompt_vote' });
+      this.startTimer('prompt_vote', io, roomCode);
+      console.log(`🔄 Room ${roomCode}: Starting round ${this.currentRound} (auto from leaderboard)`);
     }
   }
 
@@ -219,6 +229,7 @@ export class GameRoom {
       this.phase = 'leaderboard';
       io.to(roomCode).emit('game:state', this.toJSON());
       io.to(roomCode).emit('game:phase', { phase: 'leaderboard' });
+      this.startTimer('leaderboard', io, roomCode);
       console.log(`📊 Room ${roomCode}: Showing leaderboard at round ${this.currentRound}`);
     } else {
       // Next round

@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 
 // Always use current hostname for API calls (works on Tailscale/LAN)
-// When on HTTPS (via Caddy), use same origin (Vite proxies to backend)
+// When on HTTPS (via Caddy), use same origin with /kwim prefix
 // When on HTTP, connect directly to backend on port 3002
 const getApiUrl = () => {
   const protocol = window.location.protocol
@@ -10,8 +9,8 @@ const getApiUrl = () => {
   const port = window.location.port
 
   if (protocol === 'https:') {
-    // HTTPS via Caddy - use same origin (Vite proxy handles backend)
-    return port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`
+    // HTTPS via Caddy - use same origin with /kwim prefix
+    return port ? `${protocol}//${hostname}:${port}/kwim` : `${protocol}//${hostname}/kwim`
   } else {
     // HTTP - connect directly to backend
     return `${protocol}//${hostname}:3002`
@@ -246,31 +245,39 @@ export function GifSearch({ onSelect, selectedGif }) {
         </div>
       )}
 
-      {/* GIF Grid - more rows, fill available space, Safari compatible */}
-      <div className="grid grid-cols-3 gap-1.5 flex-1 overflow-y-auto pr-1" style={{ minHeight: '35vh', maxHeight: '45vh' }}>
-        <AnimatePresence>
-          {gifs.map((gif) => (
-            <motion.button
-              key={gif.id}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              onClick={() => handleSelect(gif)}
-              className={`rounded-lg overflow-hidden ${
-                selectedGif === gif.url ? 'ring-2 ring-accent' : ''
-              }`}
-              style={{ height: '100px' }} /* Fixed height for Safari compatibility */
-            >
-              <img
-                src={gif.preview || gif.url}
-                alt={gif.title}
-                className="w-full h-full object-cover"
-                loading="lazy"
-                style={{ display: 'block' }} /* Fix Safari image display */
-              />
-            </motion.button>
-          ))}
-        </AnimatePresence>
+      {/* GIF Grid - Safari optimized with GPU acceleration */}
+      <div
+        className="grid grid-cols-3 gap-1.5 flex-1 overflow-y-auto pr-1"
+        style={{
+          minHeight: '35vh',
+          maxHeight: '45vh',
+          transform: 'translateZ(0)',
+          willChange: 'scroll-position',
+          WebkitOverflowScrolling: 'touch'
+        }}
+      >
+        {gifs.map((gif) => (
+          <button
+            key={gif.id}
+            onClick={() => handleSelect(gif)}
+            className={`rounded-lg overflow-hidden transition-transform active:scale-95 ${
+              selectedGif === gif.url ? 'ring-2 ring-accent' : ''
+            }`}
+            style={{
+              height: '100px',
+              transform: 'translateZ(0)',
+              willChange: 'transform'
+            }}
+          >
+            <img
+              src={gif.preview || gif.url}
+              alt={gif.title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              style={{ display: 'block' }}
+            />
+          </button>
+        ))}
       </div>
 
       {/* Loading State */}

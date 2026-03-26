@@ -1,6 +1,42 @@
 import { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 import { socket, connectSocket } from '../services/socket';
 
+// LocalStorage keys for reconnection
+const STORAGE_KEY = 'kwim_player_session';
+
+// Save player session to localStorage
+const savePlayerSession = (code, playerId) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ code, playerId, timestamp: Date.now() }));
+  } catch (e) {
+    console.warn('Failed to save player session:', e);
+  }
+};
+
+// Load player session from localStorage
+const loadPlayerSession = () => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) return null;
+    const session = JSON.parse(data);
+    // Only restore sessions from the last 30 minutes
+    if (Date.now() - session.timestamp > 30 * 60 * 1000) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return session;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Clear player session from localStorage
+const clearPlayerSession = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (e) {}
+};
+
 const GameContext = createContext(null);
 
 const initialState = {
@@ -111,6 +147,8 @@ export function GameProvider({ children }) {
 
     const handleRoomJoined = ({ player, gameState }) => {
       console.log('👋 Room joined:', player.name);
+      // Save session for reconnection
+      savePlayerSession(gameState.code, player.id);
       dispatch({ type: 'SET_PLAYER', payload: { player, gameState } });
     };
 
@@ -204,6 +242,19 @@ export function GameProvider({ children }) {
     }
   }, []);
 
+  // Rejoin a room after disconnect (uses stored session)
+  const rejoinRoom = useCallback((code, playerId) => {
+    console.log('🔄 Attempting to rejoin room:', code, 'playerId:', playerId);
+    if (!socket.connected) {
+      socket.once('connect', () => {
+        socket.emit('player:rejoin', { code, playerId });
+      });
+      connectSocket();
+    } else {
+      socket.emit('player:rejoin', { code, playerId });
+    }
+  }, []);
+
   const startGame = useCallback((rounds = 3) => {
     if (socket.connected) {
       socket.emit('host:start', { rounds });
@@ -260,6 +311,7 @@ export function GameProvider({ children }) {
     ...state,
     createRoom,
     joinRoom,
+    rejoinRoom,
     startGame,
     votePrompt,
     submitGif,
@@ -269,6 +321,7 @@ export function GameProvider({ children }) {
     resetGame,
     restartGame,
     clearError,
+    clearPlayerSession,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

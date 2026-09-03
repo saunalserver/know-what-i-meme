@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 /* Custom theme colors */
@@ -14,29 +13,6 @@
   --color-success: #43b581;
   --color-error: #f04747;
   --color-warning: #faa61a;
-
-  --font-family-sans: 'Inter', system-ui, sans-serif;
-
-  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-bounce-slow: bounce 2s infinite;
-  --animate-fade-in: fadeIn 0.5s ease-out;
-  --animate-slide-up: slideUp 0.3s ease-out;
-  --animate-scale-in: scaleIn 0.3s ease-out;
-}
-
-@keyframes fadeIn {
-  0% { opacity: 0; }
-  100% { opacity: 1; }
-}
-
-@keyframes slideUp {
-  0% { transform: translateY(20px); opacity: 0; }
-  100% { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes scaleIn {
-  0% { transform: scale(0.9); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
 }
 
 * {
@@ -46,10 +22,13 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  /* System fonts only: a webfont download stalls the first paint, and this
+     game is often played on a LAN with no internet at all. */
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   background-color: #1a1a2e;
   color: #ffffff;
   min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
 }
 
 /* Custom scrollbar */
@@ -70,58 +49,30 @@ body {
   background: #5b6eae;
 }
 
-/* GIF grid animations */
-.gif-item {
-  transition: transform 200ms;
-  cursor: pointer;
-}
-
-.gif-item:hover {
-  transform: scale(1.05);
-}
-
-/* Button styles */
-.btn-primary {
-  background-color: #7289da;
-  color: white;
-  font-weight: 600;
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
-  transition: all 200ms;
-}
-
-.btn-primary:hover {
-  background-color: #5b6eae;
-  transform: scale(1.05);
-}
-
-.btn-secondary {
-  background-color: #16213e;
-  color: white;
-  font-weight: 600;
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
-  transition: all 200ms;
-}
-
-.btn-secondary:hover {
-  background-color: #0f3460;
-}
-
+/* Buttons */
+.btn-primary,
+.btn-secondary,
 .btn-success {
-  background-color: #43b581;
-  color: white;
   font-weight: 600;
   padding: 0.75rem 1.5rem;
   border-radius: 0.5rem;
-  transition: all 200ms;
+  color: white;
+  transition: background-color 200ms, transform 200ms, opacity 200ms;
 }
 
-.btn-success:hover {
-  opacity: 0.8;
-}
+.btn-primary { background-color: #7289da; }
+.btn-secondary { background-color: #16213e; }
+.btn-success { background-color: #43b581; }
 
-/* Card styles */
+.btn-primary:hover:not(:disabled) { background-color: #5b6eae; transform: scale(1.03); }
+.btn-secondary:hover:not(:disabled) { background-color: #0f3460; }
+.btn-success:hover:not(:disabled) { background-color: #3aa070; transform: scale(1.03); }
+
+.btn-primary:active:not(:disabled),
+.btn-secondary:active:not(:disabled),
+.btn-success:active:not(:disabled) { transform: scale(0.98); }
+
+/* Card */
 .card {
   background-color: #16213e;
   border-radius: 0.75rem;
@@ -129,12 +80,14 @@ body {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
 }
 
-/* Input styles */
+/* Input */
 .input {
   background-color: #0f3460;
   color: white;
   border: 2px solid #0f3460;
   border-radius: 0.5rem;
+  /* 16px keeps iOS Safari from zooming in when the field is focused. */
+  font-size: 16px;
   padding: 0.75rem 1rem;
   outline: none;
   transition: border-color 200ms;
@@ -147,9 +100,9 @@ body {
 
 /* Room code display */
 .room-code {
-  font-family: 'Inter', monospace;
   font-weight: 800;
-  letter-spacing: 0.5em;
+  letter-spacing: 0.25em;
+  text-indent: 0.25em; /* Offset the trailing letter-space so it stays centred */
   text-shadow: 0 0 20px rgba(114, 137, 218, 0.5);
 }
 
@@ -169,39 +122,6 @@ body {
   flex-shrink: 0;
 }
 
-/* Meme card */
-.meme-card {
-  background-color: #16213e;
-  border-radius: 0.75rem;
-  overflow: hidden;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-}
-
-/* Vote button */
-.vote-btn {
-  background-color: #7289da;
-  color: white;
-  font-weight: 700;
-  padding: 1rem 2rem;
-  border-radius: 9999px;
-  transition: all 200ms;
-}
-
-.vote-btn:hover {
-  background-color: #5b6eae;
-  transform: scale(1.1);
-}
-
-/* Animations */
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-}
-
-.animate-float {
-  animation: float 3s ease-in-out infinite;
-}
-
 @keyframes glow {
   0%, 100% { box-shadow: 0 0 20px rgba(114, 137, 218, 0.3); }
   50% { box-shadow: 0 0 40px rgba(114, 137, 218, 0.6); }
@@ -211,14 +131,13 @@ body {
   animation: glow 2s ease-in-out infinite;
 }
 
-@keyframes confetti {
-  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
-  100% { transform: translateY(-100vh) rotate(720deg); opacity: 0; }
-}
-
-.confetti {
-  position: fixed;
-  width: 10px;
-  height: 10px;
-  animation: confetti 3s ease-out forwards;
+/* Respect a reduced-motion preference: the game is full of looping animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

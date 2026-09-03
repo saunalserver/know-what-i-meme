@@ -11,15 +11,20 @@ function shuffleArray(array) {
   return shuffled;
 }
 
+// Shown when the round timer runs out before a player picks anything.
+export const NO_GIF_PLACEHOLDER =
+  'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif';
+
+export const MAX_PLAYERS = 9;
+
 export class GameRoom {
   constructor(code, hostId) {
     this.code = code;
     this.hostId = hostId;
     this.players = [];
-    this.phase = 'lobby'; // lobby, waiting, prompt_vote, gif_search, presentation, voting, round_results, leaderboard, final_results
+    this.phase = 'lobby'; // lobby, prompt_vote, gif_search, presentation, voting, round_results, leaderboard, final_results
     this.currentRound = 0;
     this.totalRounds = 3;
-    this.prompts = [];
     this.currentPrompt = null;
     this.currentPromptOptions = [];
     this.promptVotes = new Map(); // promptIndex -> count
@@ -27,11 +32,14 @@ export class GameRoom {
     this.votes = new Map(); // voterId -> targetId
     this.presentationIndex = 0;
     this.presentationOrder = []; // Randomized player IDs for anonymous presentation
+    this.usedPrompts = new Set(); // Avoid repeating a prompt within one game
     this.createdAt = Date.now();
+    this.lastActivityAt = Date.now();
 
     // Timer state
+    this.timerInterval = null;
     this.timerSeconds = 0;
-    this.timerPhase = null; // Which phase the timer is for
+    this.timerPhase = null;
   }
 
   // Timer durations in seconds
@@ -44,32 +52,37 @@ export class GameRoom {
     leaderboard: 10,    // Mid-game leaderboard
   };
 
+  touch() {
+    this.lastActivityAt = Date.now();
+  }
+
+  // ============================================
+  // TIMERS
+  // ============================================
+
+  // Every phase timer behaves the same way: broadcast a countdown, then run
+  // the phase's expiry handler. Presentation and round_results used to have
+  // their own near-identical copies of this.
   startTimer(phase, io, roomCode) {
+    this.stopTimer();
+
+    const total = GameRoom.TIMER_DURATIONS[phase] || 30;
     this.timerPhase = phase;
-    this.timerSeconds = GameRoom.TIMER_DURATIONS[phase] || 30;
+    this.timerSeconds = total;
 
-    // Emit initial timer state
-    io.to(roomCode).emit('timer:update', {
-      phase,
-      seconds: this.timerSeconds,
-      total: GameRoom.TIMER_DURATIONS[phase] || 30
-    });
-
-    // Clear any existing interval
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-    }
-
-    // Start countdown
-    this.timerInterval = setInterval(() => {
-      this.timerSeconds--;
-
+    const emit = () => {
       io.to(roomCode).emit('timer:update', {
         phase,
         seconds: this.timerSeconds,
-        total: GameRoom.TIMER_DURATIONS[phase] || 30
+        total,
       });
+    };
 
+    emit();
+
+    this.timerInterval = setInterval(() => {
+      this.timerSeconds--;
+      emit();
       if (this.timerSeconds <= 0) {
         this.handleTimerExpired(phase, io, roomCode);
       }
@@ -85,178 +98,135 @@ export class GameRoom {
     this.timerPhase = null;
   }
 
+  // Called when a room is discarded. Without this the interval kept ticking
+  // and emitting into an empty room for the lifetime of the process.
+  destroy() {
+    this.stopTimer();
+    this.players = [];
+  }
+
   handleTimerExpired(phase, io, roomCode) {
     this.stopTimer();
 
-    if (phase === 'prompt_vote') {
-      // Force select winning prompt from current votes
-      if (this.promptVotes.size > 0) {
-        this.getWinningPrompt();
-      } else {
-        // No votes? Pick random
-        this.currentPrompt = this.currentPromptOptions[Math.floor(Math.random() * 3)];
-      }
-      this.phase = 'gif_search';
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'gif_search' });
-      this.startTimer('gif_search', io, roomCode);
-    } else if (phase === 'gif_search') {
-      // Submit empty GIF for players who haven't submitted
-      this.players.forEach(p => {
-        if (!p.hasSubmitted) {
-          p.currentGif = 'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif'; // Default "no GIF" placeholder
-          p.hasSubmitted = true;
-        }
-      });
-      this.phase = 'presentation';
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'presentation' });
-    } else if (phase === 'voting') {
-      // Calculate results with current votes
-      const results = this.calculateRoundResults();
-      this.phase = 'round_results';
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'round_results' });
-      io.to(roomCode).emit('round:results', { results });
-    } else if (phase === 'leaderboard') {
-      // Auto-advance to next round from leaderboard
-      this.currentRound++;
-      this.phase = 'prompt_vote';
-      this.preparePromptVoting();
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'prompt_vote' });
-      this.startTimer('prompt_vote', io, roomCode);
-      console.log(`🔄 Room ${roomCode}: Starting round ${this.currentRound} (auto from leaderboard)`);
+    switch (phase) {
+      case 'prompt_vote':
+        this.resolvePromptVote();
+        this.enterPhase('gif_search', io, roomCode);
+        break;
+
+      case 'gif_search':
+        // Anyone who never picked gets the placeholder, so the round can finish.
+        this.activePlayers().forEach(p => {
+          if (!p.hasSubmitted) {
+            p.currentGif = NO_GIF_PLACEHOLDER;
+            p.hasSubmitted = true;
+            this.submissions.set(p.id, p.currentGif);
+          }
+        });
+        this.enterPhase('presentation', io, roomCode);
+        break;
+
+      case 'presentation':
+        this.advancePresentation(io, roomCode);
+        break;
+
+      case 'voting':
+        this.finishVoting(io, roomCode);
+        break;
+
+      case 'round_results':
+      case 'leaderboard':
+        this.advanceAfterResults(io, roomCode);
+        break;
     }
   }
 
-  startPresentationTimer(io, roomCode) {
-    this.timerPhase = 'presentation';
-    this.timerSeconds = GameRoom.TIMER_DURATIONS.presentation;
+  // ============================================
+  // PHASE TRANSITIONS
+  // ============================================
 
-    // Emit initial timer state
-    io.to(roomCode).emit('timer:update', {
-      phase: 'presentation',
-      seconds: this.timerSeconds,
-      total: GameRoom.TIMER_DURATIONS.presentation,
-    });
+  // Single place that sets a phase, broadcasts it and starts its timer, so
+  // no caller can move the game forward and forget one of the three.
+  enterPhase(phase, io, roomCode) {
+    this.phase = phase;
+    this.touch();
 
-    // Clear any existing interval
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
+    io.to(roomCode).emit('game:state', this.toJSON());
+    io.to(roomCode).emit('game:phase', { phase });
+
+    if (GameRoom.TIMER_DURATIONS[phase]) {
+      this.startTimer(phase, io, roomCode);
     }
-
-    // Start countdown
-    this.timerInterval = setInterval(() => {
-      this.timerSeconds--;
-
-      io.to(roomCode).emit('timer:update', {
-        phase: 'presentation',
-        seconds: this.timerSeconds,
-        total: GameRoom.TIMER_DURATIONS.presentation,
-      });
-
-      if (this.timerSeconds <= 0) {
-        this.handlePresentationTimerExpired(io, roomCode);
-      }
-    }, 1000);
   }
 
-  handlePresentationTimerExpired(io, roomCode) {
+  advancePresentation(io, roomCode) {
     this.stopTimer();
-
-    // Advance to next meme or voting phase
     this.presentationIndex++;
 
-    if (this.presentationIndex >= this.players.length) {
-      // All memes shown, move to voting
-      this.phase = 'voting';
+    if (this.presentationIndex >= this.presentationOrder.length) {
       this.presentationIndex = 0;
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'voting' });
-      this.startTimer('voting', io, roomCode);
+      this.enterPhase('voting', io, roomCode);
     } else {
-      // Show next meme, restart presentation timer
       io.to(roomCode).emit('game:state', this.toJSON());
-      this.startPresentationTimer(io, roomCode);
+      this.startTimer('presentation', io, roomCode);
     }
   }
 
-  startRoundResultsTimer(io, roomCode) {
-    this.timerPhase = 'round_results';
-    this.timerSeconds = GameRoom.TIMER_DURATIONS.round_results;
-
-    // Emit initial timer state
-    io.to(roomCode).emit('timer:update', {
-      phase: 'round_results',
-      seconds: this.timerSeconds,
-      total: GameRoom.TIMER_DURATIONS.round_results,
-    });
-
-    // Clear any existing interval
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-    }
-
-    // Start countdown
-    this.timerInterval = setInterval(() => {
-      this.timerSeconds--;
-
-      io.to(roomCode).emit('timer:update', {
-        phase: 'round_results',
-        seconds: this.timerSeconds,
-        total: GameRoom.TIMER_DURATIONS.round_results,
-      });
-
-      if (this.timerSeconds <= 0) {
-        this.handleRoundResultsTimerExpired(io, roomCode);
-      }
-    }, 1000);
+  finishVoting(io, roomCode) {
+    this.stopTimer();
+    const results = this.calculateRoundResults();
+    this.enterPhase('round_results', io, roomCode);
+    io.to(roomCode).emit('round:results', { results });
+    return results;
   }
 
-  handleRoundResultsTimerExpired(io, roomCode) {
+  // Where the game goes after round results or the mid-game leaderboard.
+  advanceAfterResults(io, roomCode) {
     this.stopTimer();
 
-    // Determine next phase (same logic as host:next handler)
-    if (this.currentRound >= this.totalRounds) {
-      // Game over
-      this.phase = 'final_results';
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'final_results' });
+    if (this.phase !== 'leaderboard' && this.currentRound >= this.totalRounds) {
+      this.enterPhase('final_results', io, roomCode);
       console.log(`🎉 Room ${roomCode}: Game complete!`);
-    } else if (this.shouldShowLeaderboard()) {
-      // Show leaderboard every 3 rounds for games with 5+ rounds
-      this.phase = 'leaderboard';
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'leaderboard' });
-      this.startTimer('leaderboard', io, roomCode);
-      console.log(`📊 Room ${roomCode}: Showing leaderboard at round ${this.currentRound}`);
-    } else {
-      // Next round
-      this.currentRound++;
-      this.phase = 'prompt_vote';
-      this.preparePromptVoting();
-      io.to(roomCode).emit('game:state', this.toJSON());
-      io.to(roomCode).emit('game:phase', { phase: 'prompt_vote' });
-      this.startTimer('prompt_vote', io, roomCode);
-      console.log(`🔄 Room ${roomCode}: Starting round ${this.currentRound}`);
+      return;
     }
+
+    if (this.phase !== 'leaderboard' && this.shouldShowLeaderboard()) {
+      this.enterPhase('leaderboard', io, roomCode);
+      console.log(`📊 Room ${roomCode}: Showing leaderboard at round ${this.currentRound}`);
+      return;
+    }
+
+    this.currentRound++;
+    this.preparePromptVoting();
+    this.enterPhase('prompt_vote', io, roomCode);
+    console.log(`🔄 Room ${roomCode}: Starting round ${this.currentRound}`);
   }
 
-  // Check if we should show leaderboard (every 3 rounds for games with 5+ rounds)
+  // Show a leaderboard every 3 rounds, but only in games long enough to need one.
   shouldShowLeaderboard() {
     return this.totalRounds >= 5 && this.currentRound > 0 && this.currentRound % 3 === 0;
   }
 
   getLeaderboard() {
-    return [...this.players]
+    return this.players
       .map(p => ({ id: p.id, name: p.name, score: p.score, color: p.color }))
       .sort((a, b) => b.score - a.score);
+  }
+
+  // ============================================
+  // PLAYERS
+  // ============================================
+
+  // A player whose phone dropped out still owns their score and submission;
+  // they just shouldn't hold up the round.
+  activePlayers() {
+    return this.players.filter(p => p.connected);
   }
 
   addPlayer(playerId, playerName, photo = null) {
     const player = new Player(playerId, playerName, photo);
     this.players.push(player);
+    this.touch();
     return player;
   }
 
@@ -264,6 +234,22 @@ export class GameRoom {
     const index = this.players.findIndex(p => p.id === playerId);
     if (index !== -1) {
       this.players.splice(index, 1);
+      this.presentationOrder = this.presentationOrder.filter(id => id !== playerId);
+      this.submissions.delete(playerId);
+      this.votes.delete(playerId);
+      // Votes cast *for* the departed player no longer have a target.
+      for (const [voterId, targetId] of this.votes.entries()) {
+        if (targetId === playerId) {
+          this.votes.delete(voterId);
+          const voter = this.getPlayer(voterId);
+          if (voter) voter.hasVoted = false;
+        }
+      }
+      // Presentation may now be pointing past the end of a shorter list.
+      if (this.presentationIndex >= this.presentationOrder.length) {
+        this.presentationIndex = Math.max(0, this.presentationOrder.length - 1);
+      }
+      this.touch();
     }
   }
 
@@ -271,30 +257,36 @@ export class GameRoom {
     return this.players.find(p => p.id === playerId);
   }
 
+  // ============================================
+  // ROUNDS
+  // ============================================
+
   startGame(totalRounds = 3) {
-    this.totalRounds = totalRounds;
+    this.totalRounds = Math.min(Math.max(Number(totalRounds) || 3, 1), 15);
     this.currentRound = 1;
-    this.phase = 'prompt_vote';
+    this.usedPrompts.clear();
     this.preparePromptVoting();
+    this.phase = 'prompt_vote';
+    this.touch();
   }
 
   preparePromptVoting() {
-    // Get raw prompts, then fill in player names
-    const rawPrompts = getRandomPrompts(3, true); // includeEdgy = true
+    const rawPrompts = getRandomPrompts(3, true, this.usedPrompts);
+    rawPrompts.forEach(p => this.usedPrompts.add(p));
+
     this.currentPromptOptions = rawPrompts.map(prompt =>
       fillPlayerPlaceholders(prompt, this.players)
     );
+    this.currentPrompt = null;
+
     this.promptVotes.clear();
-    // Initialize votes to 0
-    this.currentPromptOptions.forEach((_, index) => {
-      this.promptVotes.set(index, 0);
-    });
-    // Reset player round state
+    this.currentPromptOptions.forEach((_, index) => this.promptVotes.set(index, 0));
+
     this.players.forEach(p => p.resetForNewRound());
     this.submissions.clear();
     this.votes.clear();
     this.presentationIndex = 0;
-    // Randomize presentation order for this round
+    // Randomize presentation order so memes stay anonymous.
     this.presentationOrder = shuffleArray(this.players.map(p => p.id));
   }
 
@@ -302,100 +294,118 @@ export class GameRoom {
     const player = this.getPlayer(playerId);
     if (!player) return false;
 
-    // If clicking the same prompt, deselect it
+    // A client sending a junk index used to poison the vote map and leave the
+    // round with an undefined prompt.
+    if (!Number.isInteger(promptIndex) ||
+        promptIndex < 0 ||
+        promptIndex >= this.currentPromptOptions.length) {
+      return false;
+    }
+
+    this.touch();
+
+    // Clicking the current choice again clears it.
     if (player.promptVote === promptIndex) {
-      // Remove previous vote from count
-      const prevCount = this.promptVotes.get(promptIndex) || 0;
-      this.promptVotes.set(promptIndex, Math.max(0, prevCount - 1));
+      this.promptVotes.set(promptIndex, Math.max(0, (this.promptVotes.get(promptIndex) || 0) - 1));
       player.promptVote = null;
       return true;
     }
 
-    // If already voted for a different prompt, switch vote
     if (player.promptVote !== null) {
-      const prevCount = this.promptVotes.get(player.promptVote) || 0;
-      this.promptVotes.set(player.promptVote, Math.max(0, prevCount - 1));
+      const prev = this.promptVotes.get(player.promptVote) || 0;
+      this.promptVotes.set(player.promptVote, Math.max(0, prev - 1));
     }
 
     player.promptVote = promptIndex;
-    const currentCount = this.promptVotes.get(promptIndex) || 0;
-    this.promptVotes.set(promptIndex, currentCount + 1);
+    this.promptVotes.set(promptIndex, (this.promptVotes.get(promptIndex) || 0) + 1);
     return true;
   }
 
   allPlayersVotedForPrompt() {
-    return this.players.every(p => p.promptVote !== null);
+    const active = this.activePlayers();
+    return active.length > 0 && active.every(p => p.promptVote !== null);
   }
 
+  // Highest-voted prompt wins; ties (including nobody voting) break randomly
+  // rather than always landing on option 1.
   getWinningPrompt() {
-    let maxVotes = 0;
-    let winningIndex = 0;
+    if (this.currentPromptOptions.length === 0) return null;
 
-    for (const [index, votes] of this.promptVotes.entries()) {
-      if (votes > maxVotes) {
-        maxVotes = votes;
-        winningIndex = index;
+    let best = -1;
+    let winners = [];
+    for (let i = 0; i < this.currentPromptOptions.length; i++) {
+      const votes = this.promptVotes.get(i) || 0;
+      if (votes > best) {
+        best = votes;
+        winners = [i];
+      } else if (votes === best) {
+        winners.push(i);
       }
     }
 
-    this.currentPrompt = this.currentPromptOptions[winningIndex];
+    const index = winners[Math.floor(Math.random() * winners.length)];
+    this.currentPrompt = this.currentPromptOptions[index];
     return this.currentPrompt;
+  }
+
+  resolvePromptVote() {
+    return this.getWinningPrompt();
   }
 
   submitGif(playerId, gifUrl) {
     const player = this.getPlayer(playerId);
     if (!player) return false;
+    if (typeof gifUrl !== 'string' || !/^https?:\/\//i.test(gifUrl)) return false;
 
-    // Allow changing GIF during the timer period
-    // Just update the GIF URL (hasSubmitted stays true once they've submitted once)
+    // Players may keep changing their pick until the timer runs out.
     player.currentGif = gifUrl;
     player.hasSubmitted = true;
     this.submissions.set(playerId, gifUrl);
+    this.touch();
     return true;
   }
 
   allPlayersSubmitted() {
-    return this.players.every(p => p.hasSubmitted);
+    const active = this.activePlayers();
+    return active.length > 0 && active.every(p => p.hasSubmitted);
   }
 
   castVote(voterId, targetId) {
     const voter = this.getPlayer(voterId);
     if (!voter) return false;
     if (voterId === targetId) return false; // Can't vote for yourself
+    // Ignore votes for someone who isn't in the round.
+    if (!this.presentationOrder.includes(targetId)) return false;
 
-    // Allow changing votes - just update the vote
     voter.hasVoted = true;
     this.votes.set(voterId, targetId);
+    this.touch();
     return true;
   }
 
   allPlayersVoted() {
-    return this.players.every(p => p.hasVoted);
+    const active = this.activePlayers();
+    return active.length > 0 && active.every(p => p.hasVoted);
   }
 
-  // Check if this is the final round
   isFinalRound() {
     return this.currentRound >= this.totalRounds;
   }
 
-  // Get points multiplier (2x for final round)
+  // Double points in the last round keeps the game winnable to the end.
   getPointsMultiplier() {
     return this.isFinalRound() ? 2 : 1;
   }
 
   calculateRoundResults() {
     const voteCounts = new Map();
-    const voteBreakdown = new Map(); // targetId -> array of voters
+    const voteBreakdown = new Map(); // targetId -> voters
     const multiplier = this.getPointsMultiplier();
 
     for (const [voterId, targetId] of this.votes.entries()) {
-      const count = voteCounts.get(targetId) || 0;
-      voteCounts.set(targetId, count + 1);
+      voteCounts.set(targetId, (voteCounts.get(targetId) || 0) + 1);
 
-      // Track who voted for whom
-      if (!voteBreakdown.has(targetId)) {
-        voteBreakdown.set(targetId, []);
-      }
+      if (!voteBreakdown.has(targetId)) voteBreakdown.set(targetId, []);
       const voter = this.getPlayer(voterId);
       if (voter) {
         voteBreakdown.get(targetId).push({
@@ -406,14 +416,12 @@ export class GameRoom {
       }
     }
 
-    // Award points (with multiplier for final round)
     const results = [];
     for (const player of this.players) {
       const votesReceived = voteCounts.get(player.id) || 0;
       const pointsEarned = votesReceived * multiplier;
-      if (pointsEarned > 0) {
-        player.addScore(pointsEarned);
-      }
+      if (pointsEarned > 0) player.addScore(pointsEarned);
+
       results.push({
         playerId: player.id,
         playerName: player.name,
@@ -427,52 +435,28 @@ export class GameRoom {
       });
     }
 
-    // Sort by votes
     results.sort((a, b) => b.votesReceived - a.votesReceived);
     return results;
   }
 
-  nextPhase() {
-    switch (this.phase) {
-      case 'lobby':
-        this.phase = 'waiting';
-        break;
-      case 'waiting':
-        // Host must call startGame
-        break;
-      case 'prompt_vote':
-        if (this.allPlayersVotedForPrompt()) {
-          this.getWinningPrompt();
-          this.phase = 'gif_search';
-        }
-        break;
-      case 'gif_search':
-        if (this.allPlayersSubmitted()) {
-          this.phase = 'presentation';
-        }
-        break;
-      case 'presentation':
-        this.phase = 'voting';
-        break;
-      case 'voting':
-        if (this.allPlayersVoted()) {
-          this.phase = 'round_results';
-        }
-        break;
-      case 'round_results':
-        if (this.currentRound >= this.totalRounds) {
-          this.phase = 'final_results';
-        } else {
-          this.currentRound++;
-          this.phase = 'prompt_vote';
-          this.preparePromptVoting();
-        }
-        break;
-      case 'final_results':
-        // Game over
-        break;
-    }
-    return this.phase;
+  // Back to the lobby with the same players, scores cleared.
+  resetToLobby() {
+    this.stopTimer();
+    this.phase = 'lobby';
+    this.currentRound = 0;
+    this.currentPrompt = null;
+    this.currentPromptOptions = [];
+    this.promptVotes.clear();
+    this.submissions.clear();
+    this.votes.clear();
+    this.presentationIndex = 0;
+    this.presentationOrder = [];
+    this.usedPrompts.clear();
+    this.players.forEach(p => {
+      p.resetForNewRound();
+      p.score = 0;
+    });
+    this.touch();
   }
 
   toJSON() {
@@ -485,6 +469,7 @@ export class GameRoom {
       totalRounds: this.totalRounds,
       currentPrompt: this.currentPrompt,
       currentPromptOptions: this.currentPromptOptions,
+      promptVoteCounts: Object.fromEntries(this.promptVotes),
       submissions: Object.fromEntries(this.submissions),
       votes: Object.fromEntries(this.votes),
       presentationIndex: this.presentationIndex,
@@ -492,7 +477,7 @@ export class GameRoom {
       playerCount: this.players.length,
       isFinalRound: this.isFinalRound(),
       pointsMultiplier: this.getPointsMultiplier(),
-      // Timer state for reconnection sync
+      // Timer state so a reconnecting client resyncs its countdown.
       timerSeconds: this.timerSeconds,
       timerPhase: this.timerPhase,
     };

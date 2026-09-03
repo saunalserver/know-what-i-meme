@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useGame } from './context/GameContext'
+import { useGame } from './context/useGame'
 
 // Pages
 import Home from './pages/Home'
@@ -14,9 +14,6 @@ function App() {
   // Host should be on HostLobby during lobby phase, HostGame during game
   const hostShouldBeInLobby = isHost && gameState && gameState.phase === 'lobby'
   const hostShouldBeInGame = isHost && gameState && gameState.phase !== 'lobby'
-
-  // Debug logging
-  console.log('App render - isHost:', isHost, 'gameState:', gameState?.phase, 'hostShouldBeInGame:', hostShouldBeInGame)
 
   return (
     <div className="min-h-screen bg-dark-primary">

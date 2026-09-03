@@ -23,14 +23,69 @@ A real-time, Jackbox-style multiplayer party game where friends compete to find 
 - **API**: Klipy GIF API
 - **Deployment**: Production-ready with support for path-based routing (e.g., `/kwim/`)
 
-## 🚀 Quick Start
-1. **Clone the repository**
-2. **Install dependencies**: `npm install`
-3. **Configure environment**: Create a `.env` file with your `KLIPY_API_KEY`.
-4. **Start development**:
-   - Server: `npm run dev:server` (Port 3002)
-   - Frontend: `npm run dev` (Port 5173)
-5. **Access**: Open `http://localhost:5173` in your browser.
+## 🔑 API Keys & Configuration
+
+Copy `.env.example` to `.env` and fill in:
+
+| Variable | Required | What it's for | Where to get it |
+|---|---|---|---|
+| `KLIPY_API_KEY` | ✅ | GIF search during rounds | Create a free account at **https://klipy.com** → dashboard → API key. |
+| `VITE_PUBLIC_URL` | — | Public address baked into the QR code / join link (e.g. `https://example.com/kwim`). Leave unset for LAN play — the host's own address is used. | Your own deployment URL, if you host it publicly. |
+| `PORT` | — | Server port (default `3002`) | — |
+
+> Note: the phone camera used for profile pictures only works over HTTPS, so use `VITE_PUBLIC_URL` with a reverse proxy if you want photos.
+
+## 🚀 Setup
+
+You need [Node.js](https://nodejs.org) 18+ and a (free) Klipy API key.
+
+**Option A — Interactive wizard (recommended)**
+
+```bash
+./setup.sh
+```
+
+Asks for your Klipy API key, writes `.env`, installs dependencies, and offers to build + start.
+
+**Option B — Manual**
+
+```bash
+cp .env.example .env   # add your KLIPY_API_KEY
+npm install
+```
+
+**Development** (hot-reloading frontend + server):
+
+```bash
+npm run dev:all         # server on :3002, Vite frontend on :5173
+```
+
+**Production** (server serves the built frontend):
+
+```bash
+npm run build
+npm start               # serves everything on :3002
+```
+
+The app also works under a path prefix like `/kwim/` behind a reverse proxy
+(Caddy/nginx) — the server serves itself under the prefix and passes Socket.io
+through on the same origin.
+
+## ▶️ Playing
+
+1. Host creates a room and gets a 4-character code + QR code.
+2. Players scan the QR (or open the link) on their phones, enter the code, pick a profile.
+3. Everyone votes on the round's prompt.
+4. Each player searches (Klipy) and submits a GIF for it.
+5. Anonymous submissions are shown — vote for the best one.
+6. Points across rounds crown the meme master. Disconnected players can rejoin with the room code.
+
+## 🧪 Tests & Lint
+
+```bash
+npm run check           # eslint + vitest
+npm run test:coverage   # with coverage
+```
 
 ## 🛡️ License
 MIT

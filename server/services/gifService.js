@@ -1,18 +1,19 @@
 // GIF Service - Klipy API
-// Live API calls, no local caching
+// Live API calls with a short in-memory result cache.
 
 import dotenv from 'dotenv';
 dotenv.config();
 
-const KLIPY_API_KEY = process.env.KLIPY_API_KEY;
 const KLIPY_BASE_URL = 'https://api.klipy.com/api/v1';
 
-// In-memory cache for trending (1 hour TTL)
-let trendingCache = [];
-let trendingCacheTime = 0;
-const CACHE_DURATION = 3600000; // 1 hour
+// Klipy allows ~100 calls/min. During a round every player searches at once,
+// often for the same obvious word, so a short shared cache both cuts calls and
+// makes repeat searches feel instant.
+const SEARCH_CACHE_TTL = 5 * 60 * 1000;
+const SEARCH_CACHE_MAX = 200;
+const TRENDING_CACHE_TTL = 60 * 60 * 1000;
+const REQUEST_TIMEOUT = 8000;
 
-// Static categories with emojis
 const CATEGORIES = [
   { id: 'reactions', name: 'Reactions', emoji: '😏' },
   { id: 'memes', name: 'Memes', emoji: '😂' },
@@ -22,12 +23,43 @@ const CATEGORIES = [
   { id: 'celebrity', name: 'Celebrity', emoji: '⭐' },
 ];
 
-// Build Klipy URL with API key in path
-function buildKlipyUrl(endpoint) {
-  return `${KLIPY_BASE_URL}/${KLIPY_API_KEY}${endpoint}`;
+// Map keeps insertion order, which gives us LRU eviction for free.
+const searchCache = new Map();
+let trendingCache = [];
+let trendingCacheTime = 0;
+
+const stats = { apiCalls: 0, cacheHits: 0, errors: 0, startedAt: Date.now() };
+
+function getApiKey() {
+  return process.env.KLIPY_API_KEY;
 }
 
-// Transform Klipy response to our format
+function cacheGet(key) {
+  const entry = searchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.time > SEARCH_CACHE_TTL) {
+    searchCache.delete(key);
+    return null;
+  }
+  // Refresh recency.
+  searchCache.delete(key);
+  searchCache.set(key, entry);
+  stats.cacheHits++;
+  return entry.gifs;
+}
+
+function cacheSet(key, gifs) {
+  searchCache.set(key, { gifs, time: Date.now() });
+  while (searchCache.size > SEARCH_CACHE_MAX) {
+    searchCache.delete(searchCache.keys().next().value);
+  }
+}
+
+// Klipy puts the API key in the path, not a header or query param.
+function buildKlipyUrl(endpoint) {
+  return `${KLIPY_BASE_URL}/${getApiKey()}${endpoint}`;
+}
+
 // Klipy structure: file.hd.gif.url, file.md.gif.url, etc.
 function transformGif(gif, defaultTitle = 'GIF') {
   const file = gif.file || {};
@@ -43,131 +75,119 @@ function transformGif(gif, defaultTitle = 'GIF') {
   };
 }
 
-// Search Klipy GIFs
-async function searchKlipy(query, limit = 20) {
-  if (!KLIPY_API_KEY) {
+async function klipyFetch(endpoint, params, defaultTitle) {
+  if (!getApiKey()) {
     throw new Error('KLIPY_API_KEY not configured');
   }
 
-  const url = `${buildKlipyUrl('/gifs/search')}?q=${encodeURIComponent(query)}&per_page=${limit}`;
+  const url = `${buildKlipyUrl(endpoint)}?${new URLSearchParams(params)}`;
+  stats.apiCalls++;
 
-  const response = await fetch(url);
+  let response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT) });
+  } catch (error) {
+    stats.errors++;
+    // A timeout or DNS failure should read the same as any other upstream fault.
+    throw new Error(`Klipy API error: ${error.name === 'TimeoutError' ? 'timeout' : error.message}`);
+  }
+
   if (!response.ok) {
+    stats.errors++;
     throw new Error(`Klipy API error: ${response.status}`);
   }
 
-  const json = await response.json();
   // Klipy response: { result: true, data: { data: [...] } }
-  const gifs = json.data?.data || [];
-  return gifs.map(gif => transformGif(gif, query));
-}
-
-// Get trending from Klipy
-async function getTrendingKlipy(limit = 20) {
-  if (!KLIPY_API_KEY) {
-    throw new Error('KLIPY_API_KEY not configured');
-  }
-
-  const url = `${buildKlipyUrl('/gifs/trending')}?per_page=${limit}`;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Klipy API error: ${response.status}`);
-  }
-
   const json = await response.json();
-  // Klipy response: { result: true, data: { data: [...] } }
   const gifs = json.data?.data || [];
-  return gifs.map(gif => transformGif(gif, 'Trending'));
+  return gifs.map(gif => transformGif(gif, defaultTitle));
 }
 
 export const gifService = {
-  // Search GIFs with optional exclusion filter
+  // Search GIFs, dropping any the caller has already been shown.
   async search(query, limit = 20, excludeIds = []) {
-    console.log(`🔍 Searching Klipy for: ${query}`);
-    const results = await searchKlipy(query, limit + excludeIds.length);
+    const normalized = query.trim().toLowerCase();
+    // Fetch a bigger page than asked for so exclusions still leave a full grid.
+    const fetchCount = Math.min(limit + excludeIds.length, 50);
+    const cacheKey = `search:${normalized}:${fetchCount}`;
 
-    // Filter out excluded IDs
-    const filtered = results.filter(gif => !excludeIds.includes(gif.id));
-    return filtered.slice(0, limit);
+    let results = cacheGet(cacheKey);
+    if (!results) {
+      results = await klipyFetch('/gifs/search', { q: normalized, per_page: fetchCount }, query);
+      cacheSet(cacheKey, results);
+    }
+
+    const excluded = new Set(excludeIds);
+    return results.filter(gif => !excluded.has(String(gif.id))).slice(0, limit);
   },
 
-  // Get trending with cache and fresh parameter support
   async getTrending(limit = 20, fresh = false) {
     const now = Date.now();
 
-    // Return cached if available and not requesting fresh
-    if (!fresh && trendingCache.length > 0 && now - trendingCacheTime < CACHE_DURATION) {
-      console.log('📦 Returning cached trending');
+    if (!fresh && trendingCache.length > 0 && now - trendingCacheTime < TRENDING_CACHE_TTL) {
+      stats.cacheHits++;
       return trendingCache.slice(0, limit);
     }
 
     try {
-      console.log('🔥 Fetching trending from Klipy');
-      const gifs = await getTrendingKlipy(limit);
-      trendingCache = gifs;
-      trendingCacheTime = now;
-      return gifs;
+      // Always pull a deep page so shuffle and repeat requests have material.
+      const gifs = await klipyFetch('/gifs/trending', { per_page: 50 }, 'Trending');
+      if (gifs.length > 0) {
+        trendingCache = gifs;
+        trendingCacheTime = now;
+      }
+      return gifs.slice(0, limit);
     } catch (error) {
       console.error(`❌ Klipy trending failed: ${error.message}`);
-
-      // Return stale cache on error
-      if (trendingCache.length > 0) {
-        console.log('📦 Returning stale cache due to error');
-        return trendingCache.slice(0, limit);
-      }
-
+      // Stale trending beats an empty grid mid-round.
+      if (trendingCache.length > 0) return trendingCache.slice(0, limit);
       throw new Error('GIF service unavailable');
     }
   },
 
-  // Get random GIFs (trending + shuffle)
+  // Random = a shuffled slice of the (cached) trending pool, so it costs nothing.
   async getRandom(limit = 20) {
-    console.log('🎲 Getting random GIFs');
-    const gifs = await this.getTrending(50);
-    const shuffled = gifs.sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, limit);
+    const gifs = [...(await this.getTrending(50))];
+    for (let i = gifs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [gifs[i], gifs[j]] = [gifs[j], gifs[i]];
+    }
+    return gifs.slice(0, limit);
   },
 
-  // Get GIFs by category
-  async getByCategory(categoryId, limit = 20) {
-    console.log(`📁 Getting GIFs for category: ${categoryId}`);
+  getByCategory(categoryId, limit = 20) {
     return this.search(categoryId, limit);
   },
 
-  // Get available categories
   getCategories() {
     return CATEGORIES;
   },
 
-  // Get emoji to category mapping
   getEmojiMap() {
-    const map = {};
-    CATEGORIES.forEach(cat => {
-      if (cat.emoji) {
-        map[cat.emoji] = cat.id;
-      }
-    });
-    return map;
+    return Object.fromEntries(CATEGORIES.map(cat => [cat.emoji, cat.id]));
   },
 
-  // Get usage stats (placeholder - Klipy doesn't track this the same way)
   getUsageStats() {
+    const total = stats.apiCalls + stats.cacheHits;
     return {
-      klipy: { used: 'N/A', limit: 'generous' },
-      note: 'Using live Klipy API - no daily limit tracking',
+      apiCalls: stats.apiCalls,
+      cacheHits: stats.cacheHits,
+      errors: stats.errors,
+      hitRate: total ? `${Math.round((stats.cacheHits / total) * 100)}%` : 'n/a',
+      cachedQueries: searchCache.size,
+      trendingCachedAt: trendingCacheTime ? new Date(trendingCacheTime).toISOString() : null,
+      uptimeMinutes: Math.round((Date.now() - stats.startedAt) / 60000),
     };
   },
 
-  // Get cache health (now just reports live API status)
-  getCacheHealth() {
-    return {
-      status: 'live-api',
-      cachedGifs: 0,
-      trendingCacheSize: trendingCache.length,
-      trendingCacheAge: trendingCacheTime ? Math.round((Date.now() - trendingCacheTime) / 1000 / 60) : 0,
-      message: 'Using Klipy live API - no local cache',
-    };
+  // Test seam: drop every cached result and counter.
+  resetCache() {
+    searchCache.clear();
+    trendingCache = [];
+    trendingCacheTime = 0;
+    stats.apiCalls = 0;
+    stats.cacheHits = 0;
+    stats.errors = 0;
   },
 };
 

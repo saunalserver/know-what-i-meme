@@ -36,7 +36,9 @@ class MusicManager {
     this.nodes.forEach(node => {
       try {
         node.stop()
-      } catch (e) {}
+      } catch {
+        // Already stopped: the Web Audio API throws rather than no-op.
+      }
     })
     this.nodes = []
     this.isPlaying = false
@@ -125,7 +127,7 @@ class MusicManager {
 
       const chord = chords[chordIndex % chords.length]
       chord.forEach((mult, i) => {
-        const { osc, gain, filter } = this.createPad(baseFreq * mult, i * 5, 'sine', 600)
+        const { osc, gain } = this.createPad(baseFreq * mult, i * 5, 'sine', 600)
 
         // Fade in
         gain.gain.setValueAtTime(0, this.audioContext.currentTime)

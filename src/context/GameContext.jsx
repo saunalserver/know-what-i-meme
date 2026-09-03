@@ -1,41 +1,6 @@
-import { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import { createContext, useReducer, useEffect, useCallback, useRef } from 'react';
 import { socket, connectSocket } from '../services/socket';
-
-// LocalStorage keys for reconnection
-const STORAGE_KEY = 'kwim_player_session';
-
-// Save player session to localStorage
-const savePlayerSession = (code, playerId) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ code, playerId, timestamp: Date.now() }));
-  } catch (e) {
-    console.warn('Failed to save player session:', e);
-  }
-};
-
-// Load player session from localStorage
-const loadPlayerSession = () => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) return null;
-    const session = JSON.parse(data);
-    // Only restore sessions from the last 30 minutes
-    if (Date.now() - session.timestamp > 30 * 60 * 1000) {
-      localStorage.removeItem(STORAGE_KEY);
-      return null;
-    }
-    return session;
-  } catch (e) {
-    return null;
-  }
-};
-
-// Clear player session from localStorage
-const clearPlayerSession = () => {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch (e) {}
-};
+import { loadSession, savePlayerSession, saveHostSession, clearSession } from '../utils/session';
 
 const GameContext = createContext(null);
 
@@ -50,6 +15,16 @@ const initialState = {
   timer: null, // { phase, seconds, total }
 };
 
+// Phases the server runs a countdown for; anything else clears the display.
+const TIMED_PHASES = [
+  'prompt_vote',
+  'gif_search',
+  'voting',
+  'presentation',
+  'round_results',
+  'leaderboard',
+];
+
 function gameReducer(state, action) {
   switch (action.type) {
     case 'SET_CONNECTED':
@@ -59,6 +34,7 @@ function gameReducer(state, action) {
       return {
         ...state,
         isHost: true,
+        error: null,
         roomCode: action.payload.code,
         gameState: action.payload.gameState || state.gameState,
       };
@@ -67,6 +43,7 @@ function gameReducer(state, action) {
       return {
         ...state,
         isHost: false,
+        error: null,
         player: action.payload.player,
         roomCode: action.payload.gameState?.code,
         gameState: action.payload.gameState,
@@ -98,8 +75,8 @@ function gameReducer(state, action) {
     case 'CLEAR_TIMER':
       return { ...state, timer: null };
 
-    case 'RESET':
-      return initialState;
+    case 'LEAVE_GAME':
+      return { ...initialState, isConnected: state.isConnected };
 
     default:
       return state;
@@ -108,25 +85,22 @@ function gameReducer(state, action) {
 
 export function GameProvider({ children }) {
   const [state, dispatch] = useReducer(gameReducer, initialState);
+  // Read by the socket callbacks without making them re-subscribe.
+  const roomCodeRef = useRef(null);
+  const inGameRef = useRef(false);
+  roomCodeRef.current = state.roomCode;
+  inGameRef.current = Boolean(state.gameState);
 
   // Connect socket on mount
   useEffect(() => {
     connectSocket();
 
-    const handleConnect = () => {
-      dispatch({ type: 'SET_CONNECTED', payload: true });
-      console.log('✅ Connected to server');
-    };
-
-    const handleDisconnect = () => {
-      dispatch({ type: 'SET_CONNECTED', payload: false });
-      console.log('❌ Disconnected from server');
-    };
+    const handleConnect = () => dispatch({ type: 'SET_CONNECTED', payload: true });
+    const handleDisconnect = () => dispatch({ type: 'SET_CONNECTED', payload: false });
 
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
 
-    // Check if already connected
     if (socket.connected) {
       dispatch({ type: 'SET_CONNECTED', payload: true });
     }
@@ -134,47 +108,50 @@ export function GameProvider({ children }) {
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
-      // Don't disconnect the socket on cleanup - it's a singleton
+      // The socket is a singleton; leave it connected across route changes.
     };
   }, []);
 
-  // Game event listeners
+  // Game event listeners. These are registered once: re-subscribing on every
+  // state change (as this used to) meant events could land between the
+  // teardown and setup of a handler and be dropped.
   useEffect(() => {
     const handleRoomCreated = ({ code, gameState }) => {
-      console.log('🏠 Room created:', code, 'gameState:', gameState?.phase);
+      saveHostSession(code);
       dispatch({ type: 'SET_HOST', payload: { code, gameState } });
     };
 
     const handleRoomJoined = ({ player, gameState }) => {
-      console.log('👋 Room joined:', player.name);
-      // Save session for reconnection
       savePlayerSession(gameState.code, player.id);
       dispatch({ type: 'SET_PLAYER', payload: { player, gameState } });
     };
 
     const handleRoomError = ({ message }) => {
-      console.error('❌ Room error:', message);
+      // An error before we're in a game means the saved session is stale
+      // (room gone, game already started) -- drop it so we stop retrying.
+      if (!inGameRef.current) clearSession();
       dispatch({ type: 'SET_ERROR', payload: message });
     };
 
     const handleGameState = (gameState) => {
-      console.log('🎮 Game state updated:', gameState.phase);
       dispatch({ type: 'SET_GAME_STATE', payload: gameState });
     };
 
     const handlePhaseChange = ({ phase }) => {
-      console.log('Phase changed:', phase);
+      if (!TIMED_PHASES.includes(phase)) {
+        dispatch({ type: 'CLEAR_TIMER' });
+      }
+      if (phase === 'prompt_vote') {
+        // Results belong to the round that just ended.
+        dispatch({ type: 'SET_ROUND_RESULTS', payload: null });
+      }
     };
 
     const handlePlayersUpdate = ({ players, gameState }) => {
-      // If server sends full gameState, use it; otherwise merge players
       if (gameState) {
         dispatch({ type: 'SET_GAME_STATE', payload: gameState });
       } else {
-        dispatch({
-          type: 'UPDATE_PLAYERS',
-          payload: { players },
-        });
+        dispatch({ type: 'UPDATE_PLAYERS', payload: { players } });
       }
     };
 
@@ -186,19 +163,11 @@ export function GameProvider({ children }) {
       dispatch({ type: 'SET_TIMER', payload: timerData });
     };
 
-    // Clear timer when phase changes to something without a timer
-    const handlePhaseChangeWithTimer = ({ phase }) => {
-      console.log('Phase changed:', phase);
-      if (!['prompt_vote', 'gif_search', 'voting', 'presentation', 'round_results'].includes(phase)) {
-        dispatch({ type: 'CLEAR_TIMER' });
-      }
-    };
-
     socket.on('room:created', handleRoomCreated);
     socket.on('room:joined', handleRoomJoined);
     socket.on('room:error', handleRoomError);
     socket.on('game:state', handleGameState);
-    socket.on('game:phase', handlePhaseChangeWithTimer);
+    socket.on('game:phase', handlePhaseChange);
     socket.on('players:update', handlePlayersUpdate);
     socket.on('round:results', handleRoundResults);
     socket.on('timer:update', handleTimerUpdate);
@@ -208,103 +177,69 @@ export function GameProvider({ children }) {
       socket.off('room:joined', handleRoomJoined);
       socket.off('room:error', handleRoomError);
       socket.off('game:state', handleGameState);
-      socket.off('game:phase', handlePhaseChangeWithTimer);
+      socket.off('game:phase', handlePhaseChange);
       socket.off('players:update', handlePlayersUpdate);
       socket.off('round:results', handleRoundResults);
       socket.off('timer:update', handleTimerUpdate);
     };
-  }, [state.gameState]);
+  }, []);
 
-  // Actions - ensure socket is connected before emitting
-  const createRoom = useCallback(() => {
-    console.log('🏠 createRoom called, socket.connected:', socket.connected);
-    if (!socket.connected) {
-      console.log('⏳ Socket not connected, waiting...');
-      socket.once('connect', () => {
-        console.log('🔌 Now connected, creating room...');
-        socket.emit('host:create');
-      });
-      connectSocket();
+  // Reclaim the room after a reconnect (wifi blip, phone waking up).
+  useEffect(() => {
+    if (!state.isConnected) return;
+
+    const session = loadSession();
+    if (!session) return;
+
+    // Already in this room under the current connection.
+    if (roomCodeRef.current === session.code && state.gameState) return;
+
+    if (session.role === 'host') {
+      socket.emit('host:rejoin', { code: session.code });
+    } else if (session.playerId) {
+      socket.emit('player:rejoin', { code: session.code, playerId: session.playerId });
+    }
+    // Only when the connection comes back, not on every state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.isConnected]);
+
+  // Emit once connected, queuing the call if the socket is still handshaking.
+  const emitWhenReady = useCallback((event, payload) => {
+    if (socket.connected) {
+      socket.emit(event, payload);
     } else {
-      console.log('🏠 Creating room...');
-      socket.emit('host:create');
-    }
-  }, []);
-
-  const joinRoom = useCallback((code, name, photo = null) => {
-    if (!socket.connected) {
-      socket.once('connect', () => {
-        socket.emit('player:join', { code, name, photo });
-      });
+      socket.once('connect', () => socket.emit(event, payload));
       connectSocket();
-    } else {
-      socket.emit('player:join', { code, name, photo });
     }
   }, []);
 
-  // Rejoin a room after disconnect (uses stored session)
-  const rejoinRoom = useCallback((code, playerId) => {
-    console.log('🔄 Attempting to rejoin room:', code, 'playerId:', playerId);
-    if (!socket.connected) {
-      socket.once('connect', () => {
-        socket.emit('player:rejoin', { code, playerId });
-      });
-      connectSocket();
-    } else {
-      socket.emit('player:rejoin', { code, playerId });
-    }
-  }, []);
+  const createRoom = useCallback(() => emitWhenReady('host:create'), [emitWhenReady]);
 
-  const startGame = useCallback((rounds = 3) => {
-    if (socket.connected) {
-      socket.emit('host:start', { rounds });
-    }
-  }, []);
+  const joinRoom = useCallback(
+    (code, name, photo = null) => emitWhenReady('player:join', { code, name, photo }),
+    [emitWhenReady]
+  );
 
-  const votePrompt = useCallback((promptIndex) => {
-    if (socket.connected) {
-      socket.emit('player:vote-prompt', { promptIndex });
-    }
-  }, []);
+  const rejoinRoom = useCallback(
+    (code, playerId) => emitWhenReady('player:rejoin', { code, playerId }),
+    [emitWhenReady]
+  );
 
-  const submitGif = useCallback((gifUrl) => {
-    if (socket.connected) {
-      socket.emit('player:submit-gif', { gifUrl });
-    }
-  }, []);
+  const startGame = useCallback((rounds = 3) => emitWhenReady('host:start', { rounds }), [emitWhenReady]);
+  const votePrompt = useCallback((promptIndex) => emitWhenReady('player:vote-prompt', { promptIndex }), [emitWhenReady]);
+  const submitGif = useCallback((gifUrl) => emitWhenReady('player:submit-gif', { gifUrl }), [emitWhenReady]);
+  const castVote = useCallback((targetId) => emitWhenReady('player:cast-vote', { targetId }), [emitWhenReady]);
+  const advancePresentation = useCallback(() => emitWhenReady('host:advance-presentation'), [emitWhenReady]);
+  const nextRound = useCallback(() => emitWhenReady('host:next'), [emitWhenReady]);
+  const resetGame = useCallback(() => emitWhenReady('host:reset'), [emitWhenReady]);
+  const restartGame = useCallback((rounds) => emitWhenReady('host:restart', { rounds }), [emitWhenReady]);
 
-  const castVote = useCallback((targetId) => {
-    if (socket.connected) {
-      socket.emit('player:cast-vote', { targetId });
-    }
-  }, []);
+  const clearError = useCallback(() => dispatch({ type: 'CLEAR_ERROR' }), []);
 
-  const advancePresentation = useCallback(() => {
-    if (socket.connected) {
-      socket.emit('host:advance-presentation');
-    }
-  }, []);
-
-  const nextRound = useCallback(() => {
-    if (socket.connected) {
-      socket.emit('host:next');
-    }
-  }, []);
-
-  const resetGame = useCallback(() => {
-    if (socket.connected) {
-      socket.emit('host:reset');
-    }
-  }, []);
-
-  const restartGame = useCallback((rounds) => {
-    if (socket.connected) {
-      socket.emit('host:restart', { rounds, roomCode: state.roomCode });
-    }
-  }, [state.roomCode]);
-
-  const clearError = useCallback(() => {
-    dispatch({ type: 'CLEAR_ERROR' });
+  // Drop the saved session and go back to a blank slate.
+  const leaveGame = useCallback(() => {
+    clearSession();
+    dispatch({ type: 'LEAVE_GAME' });
   }, []);
 
   const value = {
@@ -321,18 +256,10 @@ export function GameProvider({ children }) {
     resetGame,
     restartGame,
     clearError,
-    clearPlayerSession,
+    leaveGame,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
-}
-
-export function useGame() {
-  const context = useContext(GameContext);
-  if (!context) {
-    throw new Error('useGame must be used within a GameProvider');
-  }
-  return context;
 }
 
 export default GameContext;

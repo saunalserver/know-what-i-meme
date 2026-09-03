@@ -1,58 +1,87 @@
 import { gameStore, generateRoomCode } from '../data/gameStore.js';
-import { GameRoom } from '../game/GameRoom.js';
+import { GameRoom, MAX_PLAYERS } from '../game/GameRoom.js';
+
+const MAX_NAME_LENGTH = 15;
+// A downscaled selfie is ~30 KB of base64; anything much larger is rejected
+// rather than rebroadcast to every client on every state update.
+const MAX_PHOTO_BYTES = 400_000;
+// How long the host has to come back before the room is torn down.
+const HOST_GRACE_MS = 30_000;
+
+function sanitizeName(name) {
+  if (typeof name !== 'string') return null;
+  const trimmed = name.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return null;
+  return trimmed.slice(0, MAX_NAME_LENGTH);
+}
+
+function sanitizePhoto(photo) {
+  if (typeof photo !== 'string' || !photo) return null;
+  if (photo.length > MAX_PHOTO_BYTES) return null;
+  if (!/^(data:image\/|https?:\/\/)/i.test(photo)) return null;
+  return photo;
+}
+
+function sanitizeCode(code) {
+  if (typeof code !== 'string') return null;
+  const upper = code.trim().toUpperCase();
+  return /^[A-Z]{4}$/.test(upper) ? upper : null;
+}
 
 export function setupSocketHandlers(io) {
-  // Log all incoming connections
-  io.engine.on('connection', (socket) => {
-    console.log(`🌐 Raw connection attempt from: ${socket.request?.connection?.remoteAddress}`);
-  });
-
   io.on('connection', (socket) => {
-    console.log(`✅ Client connected: ${socket.id} from ${socket.handshake?.address}`);
+    console.log(`✅ Client connected: ${socket.id}`);
 
     let currentRoom = null;
     let isHost = false;
+
+    const fail = (message) => socket.emit('room:error', { message });
+
+    // Resolve the room this socket belongs to, or report why it can't.
+    const roomOrFail = () => {
+      if (!currentRoom) return null;
+      const room = gameStore.getRoom(currentRoom);
+      if (!room) {
+        fail('Room no longer exists');
+        return null;
+      }
+      return room;
+    };
+
+    // Host actions are checked against the room's current host id rather than
+    // this socket's closure flag, so a host that reconnected still counts.
+    const hostRoomOrFail = () => {
+      const room = roomOrFail();
+      if (!room) return null;
+      if (room.hostId !== socket.id) {
+        fail('Only the host can do that');
+        return null;
+      }
+      return room;
+    };
+
+    const broadcastState = (room) => {
+      io.to(room.code).emit('game:state', room.toJSON());
+    };
+
+    const broadcastPlayers = (room) => {
+      io.to(room.code).emit('players:update', {
+        players: room.players.map(p => p.toJSON()),
+        gameState: room.toJSON(),
+      });
+    };
 
     // ============================================
     // LOBBY HANDLERS
     // ============================================
 
-    // Host rejoins after reconnect (updates hostId to new socket.id)
-    socket.on('host:rejoin', ({ code }) => {
-      try {
-        code = code.toUpperCase();
-
-        if (!gameStore.hasRoom(code)) {
-          return socket.emit('room:error', { message: 'Room not found' });
-        }
-
-        const room = gameStore.getRoom(code);
-
-        // Update the host's socket ID to the new one
-        const oldHostId = room.hostId;
-        room.hostId = socket.id;
-        currentRoom = code;
-        isHost = true;
-        socket.join(code);
-
-        console.log(`🔄 Host rejoined room ${code}: ${oldHostId} -> ${socket.id}`);
-        socket.emit('room:created', { code, gameState: room.toJSON() });
-      } catch (error) {
-        socket.emit('room:error', { message: error.message });
-      }
-    });
-
-    // Host creates a new room
     socket.on('host:create', () => {
-      console.log(`🏠 host:create received from ${socket.id}`);
       try {
-        // Generate unique room code
         let code;
         do {
           code = generateRoomCode();
         } while (gameStore.hasRoom(code));
 
-        // Create room
         const room = new GameRoom(code, socket.id);
         gameStore.createRoom(code, room);
 
@@ -60,100 +89,124 @@ export function setupSocketHandlers(io) {
         isHost = true;
         socket.join(code);
 
-        const roomState = room.toJSON();
-        socket.emit('room:created', { code, gameState: roomState });
+        socket.emit('room:created', { code, gameState: room.toJSON() });
         console.log(`🏠 Host ${socket.id} created room ${code}`);
       } catch (error) {
-        socket.emit('room:error', { message: error.message });
+        fail(error.message);
       }
     });
 
-    // Player joins an existing room
-    socket.on('player:join', ({ code, name, photo }) => {
+    // Host reconnects (page refresh, laptop sleep) and takes the room back.
+    socket.on('host:rejoin', ({ code } = {}) => {
       try {
-        code = code.toUpperCase();
-
-        if (!gameStore.hasRoom(code)) {
-          return socket.emit('room:error', { message: 'Room not found' });
+        const roomCode = sanitizeCode(code);
+        if (!roomCode || !gameStore.hasRoom(roomCode)) {
+          return fail('Room not found');
         }
 
-        const room = gameStore.getRoom(code);
+        const room = gameStore.getRoom(roomCode);
+        const oldHostId = room.hostId;
+        room.hostId = socket.id;
+        room.touch();
 
-        if (room.phase !== 'lobby' && room.phase !== 'waiting') {
-          return socket.emit('room:error', { message: 'Game already in progress' });
+        currentRoom = roomCode;
+        isHost = true;
+        socket.join(roomCode);
+
+        console.log(`🔄 Host rejoined room ${roomCode}: ${oldHostId} -> ${socket.id}`);
+        socket.emit('room:created', { code: roomCode, gameState: room.toJSON() });
+        broadcastState(room);
+      } catch (error) {
+        fail(error.message);
+      }
+    });
+
+    socket.on('player:join', ({ code, name, photo } = {}) => {
+      try {
+        const roomCode = sanitizeCode(code);
+        if (!roomCode || !gameStore.hasRoom(roomCode)) {
+          return fail('Room not found');
         }
 
-        // Check for duplicate names
-        if (room.players.some(p => p.name.toLowerCase() === name.toLowerCase())) {
-          return socket.emit('room:error', { message: 'Name already taken' });
+        const room = gameStore.getRoom(roomCode);
+
+        if (room.phase !== 'lobby') {
+          return fail('Game already in progress');
         }
 
-        // Check max players
-        if (room.players.length >= 9) {
-          return socket.emit('room:error', { message: 'Room is full' });
+        const playerName = sanitizeName(name);
+        if (!playerName) return fail('Please enter a name');
+
+        if (room.players.some(p => p.name.toLowerCase() === playerName.toLowerCase())) {
+          return fail('Name already taken');
         }
 
-        // Add player with photo
-        const player = room.addPlayer(socket.id, name, photo);
-        currentRoom = code;
+        if (room.players.length >= MAX_PLAYERS) {
+          return fail('Room is full');
+        }
+
+        const player = room.addPlayer(socket.id, playerName, sanitizePhoto(photo));
+        currentRoom = roomCode;
         isHost = false;
-        socket.join(code);
+        socket.join(roomCode);
 
         socket.emit('room:joined', {
           player: player.toJSON(),
           gameState: room.toJSON(),
         });
+        broadcastPlayers(room);
 
-        // Notify everyone of new player
-        io.to(code).emit('players:update', {
-          players: room.players.map(p => p.toJSON()),
-          gameState: room.toJSON(),
-        });
-
-        console.log(`👋 Player "${name}" joined room ${code}`);
+        console.log(`👋 Player "${playerName}" joined room ${roomCode}`);
       } catch (error) {
-        socket.emit('room:error', { message: error.message });
+        fail(error.message);
       }
     });
 
-    // Player rejoins after disconnect (updates socket.id for existing player)
-    socket.on('player:rejoin', ({ code, playerId }) => {
+    // Player reconnects and reclaims their seat, score and submission.
+    socket.on('player:rejoin', ({ code, playerId } = {}) => {
       try {
-        code = code.toUpperCase();
-
-        if (!gameStore.hasRoom(code)) {
-          return socket.emit('room:error', { message: 'Room not found' });
+        const roomCode = sanitizeCode(code);
+        if (!roomCode || !gameStore.hasRoom(roomCode)) {
+          return fail('Room not found');
         }
 
-        const room = gameStore.getRoom(code);
-
-        // Find the player by their old ID
+        const room = gameStore.getRoom(roomCode);
         const player = room.players.find(p => p.id === playerId);
         if (!player) {
-          return socket.emit('room:error', { message: 'Player not found in room' });
+          return fail('Player not found in room');
         }
 
-        // Update player's socket ID to the new one
         const oldId = player.id;
-        player.id = socket.id;
-        currentRoom = code;
-        isHost = false;
-        socket.join(code);
+        player.markConnected(socket.id);
 
-        console.log(`🔄 Player "${player.name}" rejoined room ${code}: ${oldId} -> ${socket.id}`);
+        // Re-key anything stored under the old socket id.
+        if (room.submissions.has(oldId)) {
+          room.submissions.set(socket.id, room.submissions.get(oldId));
+          room.submissions.delete(oldId);
+        }
+        if (room.votes.has(oldId)) {
+          room.votes.set(socket.id, room.votes.get(oldId));
+          room.votes.delete(oldId);
+        }
+        for (const [voterId, targetId] of room.votes.entries()) {
+          if (targetId === oldId) room.votes.set(voterId, socket.id);
+        }
+        room.presentationOrder = room.presentationOrder.map(id => (id === oldId ? socket.id : id));
+        room.touch();
+
+        currentRoom = roomCode;
+        isHost = false;
+        socket.join(roomCode);
+
+        console.log(`🔄 Player "${player.name}" rejoined ${roomCode}: ${oldId} -> ${socket.id}`);
 
         socket.emit('room:joined', {
           player: player.toJSON(),
           gameState: room.toJSON(),
         });
-
-        // Notify everyone of the reconnection
-        io.to(code).emit('players:update', {
-          players: room.players.map(p => p.toJSON()),
-          gameState: room.toJSON(),
-        });
+        broadcastPlayers(room);
       } catch (error) {
-        socket.emit('room:error', { message: error.message });
+        fail(error.message);
       }
     });
 
@@ -161,356 +214,221 @@ export function setupSocketHandlers(io) {
     // GAME FLOW HANDLERS
     // ============================================
 
-    // Host starts the game
-    socket.on('host:start', ({ rounds }) => {
+    socket.on('host:start', ({ rounds } = {}) => {
       try {
-        console.log(`🎯 host:start received - isHost: ${isHost}, currentRoom: ${currentRoom}, rounds: ${rounds}`);
-
-        if (!isHost || !currentRoom) {
-          return socket.emit('room:error', { message: 'Only the host can start the game' });
-        }
-
-        const room = gameStore.getRoom(currentRoom);
-
-        if (room.players.length < 2) {
-          return socket.emit('room:error', { message: 'Need at least 2 players to start' });
-        }
-
-        room.startGame(rounds || 3);
-
-        const state = room.toJSON();
-        console.log(`📤 Emitting game:state - phase: ${state.phase}, promptOptions:`, state.currentPromptOptions);
-
-        io.to(currentRoom).emit('game:state', state);
-        io.to(currentRoom).emit('game:phase', { phase: room.phase });
-
-        // Start the prompt vote timer
-        room.startTimer('prompt_vote', io, currentRoom);
-
-        console.log(`🎮 Game started in room ${currentRoom} with ${room.players.length} players`);
-      } catch (error) {
-        console.error(`❌ Error in host:start:`, error);
-        socket.emit('room:error', { message: error.message });
-      }
-    });
-
-    // Player votes for a prompt
-    socket.on('player:vote-prompt', ({ promptIndex }) => {
-      console.log(`🗳️ Vote received from ${socket.id}, currentRoom: ${currentRoom}, isHost: ${isHost}`);
-      try {
-        if (!currentRoom || isHost) {
-          console.log(`❌ Vote rejected: no room or is host`);
-          return;
-        }
-
-        const room = gameStore.getRoom(currentRoom);
-        if (room.phase !== 'prompt_vote') {
-          console.log(`❌ Vote rejected: wrong phase (${room.phase})`);
-          return socket.emit('room:error', { message: 'Not in prompt voting phase' });
-        }
-
-        const success = room.voteForPrompt(socket.id, promptIndex);
-        if (!success) {
-          console.log(`❌ Vote rejected: invalid`);
-          return socket.emit('room:error', { message: 'Invalid vote' });
-        }
-
-        console.log(`✅ Vote accepted from ${socket.id} for prompt ${promptIndex}`);
-
-        // Notify everyone of the vote
-        io.to(currentRoom).emit('game:state', room.toJSON());
-
-        // Check if all voted - stop timer and advance
-        if (room.allPlayersVotedForPrompt()) {
-          room.stopTimer();
-          room.getWinningPrompt();
-          room.phase = 'gif_search';
-          io.to(currentRoom).emit('game:state', room.toJSON());
-          io.to(currentRoom).emit('game:phase', { phase: 'gif_search' });
-          room.startTimer('gif_search', io, currentRoom);
-          console.log(`📝 Room ${currentRoom}: All voted for prompt, moving to GIF search`);
-        }
-      } catch (error) {
-        console.error(`❌ Vote error: ${error.message}`);
-        socket.emit('room:error', { message: error.message });
-      }
-    });
-
-    // Player submits their GIF
-    socket.on('player:submit-gif', ({ gifUrl }) => {
-      try {
-        if (!currentRoom || isHost) return;
-
-        const room = gameStore.getRoom(currentRoom);
-        if (room.phase !== 'gif_search') {
-          return socket.emit('room:error', { message: 'Not in GIF search phase' });
-        }
-
-        const success = room.submitGif(socket.id, gifUrl);
-        if (!success) {
-          return socket.emit('room:error', { message: 'Already submitted' });
-        }
-
-        // Notify everyone
-        io.to(currentRoom).emit('game:state', room.toJSON());
-
-        // Check if all submitted - stop timer and advance
-        if (room.allPlayersSubmitted()) {
-          room.stopTimer();
-          room.phase = 'presentation';
-          io.to(currentRoom).emit('game:state', room.toJSON());
-          io.to(currentRoom).emit('game:phase', { phase: 'presentation' });
-          room.startPresentationTimer(io, currentRoom);
-          console.log(`🖼️ Room ${currentRoom}: All GIFs submitted, starting presentation`);
-        }
-      } catch (error) {
-        socket.emit('room:error', { message: error.message });
-      }
-    });
-
-    // Host advances presentation
-    socket.on('host:advance-presentation', () => {
-      try {
-        if (!isHost || !currentRoom) return;
-
-        const room = gameStore.getRoom(currentRoom);
-        if (room.phase !== 'presentation') return;
-
-        // Stop auto-advance timer (manual override)
-        room.stopTimer();
-
-        room.presentationIndex++;
-
-        if (room.presentationIndex >= room.players.length) {
-          // All memes shown, move to voting and start timer
-          room.phase = 'voting';
-          room.presentationIndex = 0;
-          io.to(currentRoom).emit('game:state', room.toJSON());
-          io.to(currentRoom).emit('game:phase', { phase: 'voting' });
-          room.startTimer('voting', io, currentRoom);
-        } else {
-          io.to(currentRoom).emit('game:state', room.toJSON());
-          // Restart presentation timer for next meme
-          room.startPresentationTimer(io, currentRoom);
-        }
-      } catch (error) {
-        socket.emit('room:error', { message: error.message });
-      }
-    });
-
-    // Player casts vote for best meme
-    socket.on('player:cast-vote', ({ targetId }) => {
-      try {
-        if (!currentRoom || isHost) return;
-
-        const room = gameStore.getRoom(currentRoom);
-        if (room.phase !== 'voting') {
-          return socket.emit('room:error', { message: 'Not in voting phase' });
-        }
-
-        const success = room.castVote(socket.id, targetId);
-        if (!success) {
-          return socket.emit('room:error', { message: 'Cannot vote for yourself' });
-        }
-
-        // Notify everyone
-        io.to(currentRoom).emit('game:state', room.toJSON());
-
-        // Check if all voted - stop timer and show results
-        if (room.allPlayersVoted()) {
-          room.stopTimer();
-          const results = room.calculateRoundResults();
-          room.phase = 'round_results';
-          io.to(currentRoom).emit('game:state', room.toJSON());
-          io.to(currentRoom).emit('game:phase', { phase: 'round_results' });
-          io.to(currentRoom).emit('round:results', { results });
-          room.startRoundResultsTimer(io, currentRoom);
-          console.log(`🏆 Room ${currentRoom}: Round ${room.currentRound} complete`);
-        }
-      } catch (error) {
-        socket.emit('room:error', { message: error.message });
-      }
-    });
-
-    // Host resets the game (back to lobby with same players)
-    socket.on('host:reset', () => {
-      try {
-        if (!isHost || !currentRoom) return;
-
-        const room = gameStore.getRoom(currentRoom);
+        const room = hostRoomOrFail();
         if (!room) return;
 
-        // Stop any running timer
-        room.stopTimer();
+        if (room.players.length < 2) {
+          return fail('Need at least 2 players to start');
+        }
 
-        // Reset game state but keep players
-        room.phase = 'lobby';
-        room.currentRound = 0;
-        room.currentPrompt = null;
-        room.currentPromptOptions = [];
-        room.promptVotes.clear();
-        room.submissions.clear();
-        room.votes.clear();
-        room.presentationIndex = 0;
+        room.startGame(rounds);
+        room.enterPhase('prompt_vote', io, room.code);
 
-        // Reset player states
-        room.players.forEach(p => {
-          p.currentGif = null;
-          p.hasVoted = false;
-          p.hasSubmitted = false;
-          p.promptVote = null;
-          // Keep scores or reset? Let's reset for a fresh game
-          p.score = 0;
-        });
-
-        io.to(currentRoom).emit('game:state', room.toJSON());
-        io.to(currentRoom).emit('game:phase', { phase: 'lobby' });
-        console.log(`🔄 Room ${currentRoom}: Game reset to lobby`);
+        console.log(`🎮 Game started in room ${room.code} with ${room.players.length} players`);
       } catch (error) {
-        socket.emit('room:error', { message: error.message });
+        console.error('❌ Error in host:start:', error);
+        fail(error.message);
       }
     });
 
-    // Host restarts the game with same players (skip lobby, start immediately)
-    socket.on('host:restart', ({ rounds, roomCode }) => {
+    socket.on('player:vote-prompt', ({ promptIndex } = {}) => {
       try {
-        const targetRoom = roomCode || currentRoom;
-
-        if (!targetRoom) {
-          return socket.emit('room:error', { message: 'No room specified' });
+        const room = roomOrFail();
+        if (!room || isHost) return;
+        if (room.phase !== 'prompt_vote') {
+          return fail('Not in prompt voting phase');
         }
 
-        const room = gameStore.getRoom(targetRoom);
-        if (!room) {
-          return socket.emit('room:error', { message: 'Room not found' });
+        if (!room.voteForPrompt(socket.id, promptIndex)) {
+          return fail('Invalid vote');
         }
 
-        // Verify this socket is the host (check room.hostId instead of closure variable)
-        if (room.hostId !== socket.id) {
-          return socket.emit('room:error', { message: 'Only the host can restart the game' });
+        broadcastState(room);
+
+        if (room.allPlayersVotedForPrompt()) {
+          room.stopTimer();
+          room.resolvePromptVote();
+          room.enterPhase('gif_search', io, room.code);
+          console.log(`📝 Room ${room.code}: All voted, moving to GIF search`);
         }
-
-        // Stop any running timer
-        room.stopTimer();
-
-        // Reset player states and scores
-        room.players.forEach(p => {
-          p.currentGif = null;
-          p.hasVoted = false;
-          p.hasSubmitted = false;
-          p.promptVote = null;
-          p.score = 0;
-        });
-
-        // Start the game
-        room.startGame(rounds || room.totalRounds);
-
-        io.to(targetRoom).emit('game:state', room.toJSON());
-        io.to(targetRoom).emit('game:phase', { phase: room.phase });
-        room.startTimer('prompt_vote', io, targetRoom);
-        console.log(`🔄 Room ${targetRoom}: Game restarted with ${room.players.length} players`);
       } catch (error) {
-        socket.emit('room:error', { message: error.message });
+        fail(error.message);
       }
     });
 
-    // Host advances to next round or final results
+    socket.on('player:submit-gif', ({ gifUrl } = {}) => {
+      try {
+        const room = roomOrFail();
+        if (!room || isHost) return;
+        if (room.phase !== 'gif_search') {
+          return fail('Not in GIF search phase');
+        }
+
+        if (!room.submitGif(socket.id, gifUrl)) {
+          return fail('That GIF could not be submitted');
+        }
+
+        broadcastState(room);
+
+        if (room.allPlayersSubmitted()) {
+          room.stopTimer();
+          room.enterPhase('presentation', io, room.code);
+          console.log(`🖼️ Room ${room.code}: All GIFs in, starting presentation`);
+        }
+      } catch (error) {
+        fail(error.message);
+      }
+    });
+
+    socket.on('host:advance-presentation', () => {
+      try {
+        const room = hostRoomOrFail();
+        if (!room || room.phase !== 'presentation') return;
+        // Manual advance overrides the auto-advance timer.
+        room.advancePresentation(io, room.code);
+      } catch (error) {
+        fail(error.message);
+      }
+    });
+
+    socket.on('player:cast-vote', ({ targetId } = {}) => {
+      try {
+        const room = roomOrFail();
+        if (!room || isHost) return;
+        if (room.phase !== 'voting') {
+          return fail('Not in voting phase');
+        }
+
+        if (!room.castVote(socket.id, targetId)) {
+          return fail('You cannot vote for that meme');
+        }
+
+        broadcastState(room);
+
+        if (room.allPlayersVoted()) {
+          room.finishVoting(io, room.code);
+          console.log(`🏆 Room ${room.code}: Round ${room.currentRound} complete`);
+        }
+      } catch (error) {
+        fail(error.message);
+      }
+    });
+
+    socket.on('host:reset', () => {
+      try {
+        const room = hostRoomOrFail();
+        if (!room) return;
+
+        room.resetToLobby();
+        broadcastState(room);
+        io.to(room.code).emit('game:phase', { phase: 'lobby' });
+        console.log(`🔄 Room ${room.code}: Reset to lobby`);
+      } catch (error) {
+        fail(error.message);
+      }
+    });
+
+    // Play again with the same players, skipping the lobby.
+    socket.on('host:restart', ({ rounds } = {}) => {
+      try {
+        const room = hostRoomOrFail();
+        if (!room) return;
+
+        if (room.players.length < 2) {
+          return fail('Need at least 2 players to start');
+        }
+
+        room.startGame(rounds || room.totalRounds);
+        room.enterPhase('prompt_vote', io, room.code);
+        console.log(`🔄 Room ${room.code}: Restarted with ${room.players.length} players`);
+      } catch (error) {
+        fail(error.message);
+      }
+    });
+
     socket.on('host:next', () => {
       try {
-        if (!isHost || !currentRoom) return;
-
-        const room = gameStore.getRoom(currentRoom);
+        const room = hostRoomOrFail();
+        if (!room) return;
         if (room.phase !== 'round_results' && room.phase !== 'leaderboard') return;
 
-        // Stop auto-advance timer (manual override)
-        room.stopTimer();
-
-        // If showing leaderboard, advance to next round
-        if (room.phase === 'leaderboard') {
-          room.currentRound++;
-          room.phase = 'prompt_vote';
-          room.preparePromptVoting();
-          io.to(currentRoom).emit('game:state', room.toJSON());
-          io.to(currentRoom).emit('game:phase', { phase: room.phase });
-          room.startTimer('prompt_vote', io, currentRoom);
-          console.log(`🔄 Room ${currentRoom}: Starting round ${room.currentRound}`);
-          return;
-        }
-
-        if (room.currentRound >= room.totalRounds) {
-          // Game over
-          room.phase = 'final_results';
-        } else if (room.shouldShowLeaderboard()) {
-          // Show leaderboard every 3 rounds for games with 5+ rounds
-          room.phase = 'leaderboard';
-        } else {
-          // Next round
-          room.currentRound++;
-          room.phase = 'prompt_vote';
-          room.preparePromptVoting();
-        }
-
-        io.to(currentRoom).emit('game:state', room.toJSON());
-        io.to(currentRoom).emit('game:phase', { phase: room.phase });
-
-        if (room.phase === 'prompt_vote') {
-          room.startTimer('prompt_vote', io, currentRoom);
-          console.log(`🔄 Room ${currentRoom}: Starting round ${room.currentRound}`);
-        } else if (room.phase === 'final_results') {
-          console.log(`🎉 Room ${currentRoom}: Game complete!`);
-        } else if (room.phase === 'leaderboard') {
-          console.log(`📊 Room ${currentRoom}: Showing leaderboard at round ${room.currentRound}`);
-        }
+        room.advanceAfterResults(io, room.code);
       } catch (error) {
-        socket.emit('room:error', { message: error.message });
+        fail(error.message);
       }
     });
 
     // ============================================
-    // DISCONNECT HANDLER
+    // DISCONNECT
     // ============================================
 
     socket.on('disconnect', () => {
       console.log(`🔌 Client disconnected: ${socket.id}`);
+      if (!currentRoom) return;
 
-      if (currentRoom) {
-        const room = gameStore.getRoom(currentRoom);
-        if (room) {
-          if (isHost) {
-            // Host disconnected - give grace period for reconnection (handles React StrictMode)
-            // Only immediately delete if game is in progress
-            if (room.phase !== 'lobby' && room.phase !== 'waiting') {
-              io.to(currentRoom).emit('room:error', { message: 'Host disconnected. Game ended.' });
-              gameStore.deleteRoom(currentRoom);
-              console.log(`💀 Room ${currentRoom} deleted (host left during game)`);
-            } else {
-              // During lobby, wait 5 seconds before deleting (allows for React StrictMode reconnects)
-              console.log(`⏳ Host disconnected from ${currentRoom}, waiting 5s before cleanup...`);
-              setTimeout(() => {
-                // Check if room still exists and host never reconnected
-                const stillExists = gameStore.hasRoom(currentRoom);
-                if (stillExists) {
-                  const currentRoomState = gameStore.getRoom(currentRoom);
-                  // If host is still the same (didn't reconnect), delete
-                  if (currentRoomState && currentRoomState.hostId === socket.id) {
-                    io.to(currentRoom).emit('room:error', { message: 'Host disconnected. Game ended.' });
-                    gameStore.deleteRoom(currentRoom);
-                    console.log(`💀 Room ${currentRoom} deleted (host didn't reconnect)`);
-                  }
-                }
-              }, 5000);
-            }
-          } else {
-            // Player left - remove from room
-            room.removePlayer(socket.id);
-            io.to(currentRoom).emit('players:update', { players: room.players.map(p => p.toJSON()) });
-            io.to(currentRoom).emit('game:state', room.toJSON());
-            console.log(`👋 Player left room ${currentRoom}`);
-          }
-        }
+      const room = gameStore.getRoom(currentRoom);
+      if (!room) return;
+
+      // A host that already reconnected owns the room under a new socket id;
+      // this is just the old socket timing out, and must not end the game.
+      if (isHost) {
+        if (room.hostId !== socket.id) return;
+        scheduleHostCleanup(io, currentRoom, socket.id);
+        return;
       }
+
+      const player = room.getPlayer(socket.id);
+      if (!player) return;
+
+      if (room.phase === 'lobby') {
+        // Nothing to preserve before the game starts.
+        room.removePlayer(socket.id);
+        console.log(`👋 ${player.name} left the lobby of ${room.code}`);
+      } else {
+        // Mid-game: keep their seat, score and submission and let the round
+        // continue without waiting on them.
+        player.markDisconnected();
+        console.log(`📴 ${player.name} dropped out of ${room.code} (seat kept)`);
+        advanceIfEveryoneIsReady(io, room);
+      }
+
+      broadcastPlayers(room);
     });
   });
+}
+
+// A player leaving used to strand the round: the "has everyone finished?"
+// checks only ran when someone acted, so the room waited out the full timer.
+function advanceIfEveryoneIsReady(io, room) {
+  if (room.phase === 'prompt_vote' && room.allPlayersVotedForPrompt()) {
+    room.stopTimer();
+    room.resolvePromptVote();
+    room.enterPhase('gif_search', io, room.code);
+  } else if (room.phase === 'gif_search' && room.allPlayersSubmitted()) {
+    room.stopTimer();
+    room.enterPhase('presentation', io, room.code);
+  } else if (room.phase === 'voting' && room.allPlayersVoted()) {
+    room.finishVoting(io, room.code);
+  }
+}
+
+// Give a disconnected host a window to come back before ending the game --
+// a refresh of the big screen shouldn't cost everyone their scores.
+function scheduleHostCleanup(io, code, hostSocketId) {
+  console.log(`⏳ Host of ${code} disconnected, waiting ${HOST_GRACE_MS / 1000}s...`);
+
+  setTimeout(() => {
+    const room = gameStore.getRoom(code);
+    if (!room) return;
+    // Reconnected under a new socket id: nothing to do.
+    if (room.hostId !== hostSocketId) return;
+
+    io.to(code).emit('room:error', { message: 'Host disconnected. Game ended.' });
+    gameStore.deleteRoom(code);
+    console.log(`💀 Room ${code} deleted (host never came back)`);
+  }, HOST_GRACE_MS).unref?.();
 }
 
 export default setupSocketHandlers;

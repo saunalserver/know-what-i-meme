@@ -1,130 +1,61 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { useGame } from '../context/GameContext'
+import { useGame } from '../context/useGame'
 import CameraModal from '../components/CameraModal'
 
-// LocalStorage key for session (must match GameContext)
-const STORAGE_KEY = 'kwim_player_session'
-
-// Load player session from localStorage
-const loadPlayerSession = () => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY)
-    if (!data) return null
-    const session = JSON.parse(data)
-    // Only restore sessions from the last 30 minutes
-    if (Date.now() - session.timestamp > 30 * 60 * 1000) {
-      localStorage.removeItem(STORAGE_KEY)
-      return null
-    }
-    return session
-  } catch (e) {
-    return null
-  }
-}
+const PREVIEW_COLOR = '#7289da'
 
 function PlayerJoin() {
   const navigate = useNavigate()
   const { code: urlCode } = useParams()
-  const { joinRoom, rejoinRoom, player, gameState, error, clearError, isConnected } = useGame()
-  const [code, setCode] = useState(urlCode || '')
+  const { joinRoom, player, gameState, error, clearError, isConnected } = useGame()
+  const [code, setCode] = useState((urlCode || '').toUpperCase())
   const [name, setName] = useState('')
-  const [photoUrl, setPhotoUrl] = useState('')
-  const [photoPreview, setPhotoPreview] = useState(null)
+  const [photo, setPhoto] = useState(null)
   const [isJoining, setIsJoining] = useState(false)
   const [showCamera, setShowCamera] = useState(false)
-  const [rejoinAttempted, setRejoinAttempted] = useState(false)
 
-  // Auto-rejoin on mount if session exists
-  useEffect(() => {
-    if (!isConnected || rejoinAttempted) return
-
-    const session = loadPlayerSession()
-    if (session && session.code) {
-      console.log('🔄 Found saved session, attempting rejoin:', session.code)
-      setRejoinAttempted(true)
-      setIsJoining(true)
-      rejoinRoom(session.code, session.playerId)
-    } else {
-      setRejoinAttempted(true)
-    }
-  }, [isConnected, rejoinAttempted, rejoinRoom])
-
-  // Pre-fill code from URL
-  useEffect(() => {
-    if (urlCode) {
-      setCode(urlCode.toUpperCase())
-    }
-  }, [urlCode])
-
-  // Update photo preview when URL changes
-  useEffect(() => {
-    if (photoUrl.trim()) {
-      // Validate it's a URL-like string
-      if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://') || photoUrl.startsWith('data:')) {
-        setPhotoPreview(photoUrl)
-      } else {
-        setPhotoPreview(null)
-      }
-    } else {
-      setPhotoPreview(null)
-    }
-  }, [photoUrl])
+  // Rejoining an existing session is handled centrally in GameContext, which
+  // fires as soon as the socket connects.
 
   // Navigate to game when joined
   useEffect(() => {
     if (player && gameState) {
-      setIsJoining(false)
       navigate(`/play/${gameState.code}`)
     }
   }, [player, gameState, navigate])
 
-  // Clear joining state on error
-  useEffect(() => {
-    if (error) {
-      setIsJoining(false)
-      // Clear the saved session on error so user can try fresh
-      try {
-        localStorage.removeItem(STORAGE_KEY)
-      } catch (e) {}
-    }
-  }, [error])
+  // A rejected join frees the button again -- derived rather than reset in an
+  // effect, so there is no render where the spinner and the error both show.
+  const joining = isJoining && !error
+
+  const canSubmit = useMemo(
+    () => code.length === 4 && name.trim().length > 0 && isConnected && !joining,
+    [code, name, isConnected, joining]
+  )
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (code.length === 4 && name.trim() && isConnected && !isJoining) {
-      setIsJoining(true)
-      // Use photoUrl which may contain a URL or a data URL from camera
-      const photo = photoUrl.trim() || null
-      joinRoom(code.toUpperCase(), name.trim(), photo)
-    }
+    if (!canSubmit) return
+    setIsJoining(true)
+    clearError()
+    joinRoom(code.toUpperCase(), name.trim(), photo)
   }
-
-  const handleCameraCapture = (dataUrl) => {
-    setPhotoUrl(dataUrl)
-    setPhotoPreview(dataUrl)
-  }
-
-  const handleClearPhoto = () => {
-    setPhotoUrl('')
-    setPhotoPreview(null)
-  }
-
-  // Generate a random color for the preview avatar
-  const previewColor = '#7289da'
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-dark-primary via-dark-secondary to-dark-tertiary" style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-      {/* Error display */}
+    <div
+      className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-dark-primary via-dark-secondary to-dark-tertiary"
+      style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
       {error && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-error text-white px-6 py-3 rounded-lg shadow-lg z-50"
+          className="fixed top-4 left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 bg-error text-white px-6 py-3 rounded-lg shadow-lg z-50 flex items-center justify-between gap-4"
         >
-          {error}
-          <button onClick={clearError} className="ml-4 opacity-70 hover:opacity-100">
+          <span>{error}</span>
+          <button onClick={clearError} className="opacity-70 hover:opacity-100 shrink-0">
             ✕
           </button>
         </motion.div>
@@ -140,63 +71,65 @@ function PlayerJoin() {
         </h1>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Room Code */}
           <div>
-            <label className="block text-text-secondary mb-2 text-lg">
+            <label htmlFor="room-code" className="block text-text-secondary mb-2 text-lg">
               Room Code
             </label>
             <input
+              id="room-code"
               type="text"
+              inputMode="text"
+              autoCapitalize="characters"
+              autoCorrect="off"
               value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
               maxLength={4}
               placeholder="ABCD"
               className="input text-center text-3xl tracking-widest font-bold"
               disabled={!!urlCode}
+              autoFocus={!urlCode}
             />
           </div>
 
-          {/* Player Name */}
           <div>
-            <label className="block text-text-secondary mb-2 text-lg">
+            <label htmlFor="player-name" className="block text-text-secondary mb-2 text-lg">
               Your Name
             </label>
             <input
+              id="player-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={15}
               placeholder="Enter your name"
               className="input text-lg"
-              autoFocus={!urlCode}
+              autoFocus={!!urlCode}
             />
           </div>
 
-          {/* Profile Picture (optional) */}
           <div>
-            <label className="block text-text-secondary mb-2 text-lg">
+            <span className="block text-text-secondary mb-2 text-lg">
               Profile Picture <span className="text-text-muted text-sm">(optional)</span>
-            </label>
+            </span>
 
-            {/* Avatar Preview with buttons */}
             <div className="flex gap-3 items-start">
-              {/* Avatar Preview */}
               <div className="relative">
                 <div
                   className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold shrink-0 overflow-hidden border-2 border-dark-tertiary"
                   style={{
-                    backgroundColor: previewColor,
-                    backgroundImage: photoPreview ? `url(${photoPreview})` : 'none',
+                    backgroundColor: PREVIEW_COLOR,
+                    backgroundImage: photo ? `url(${photo})` : 'none',
                     backgroundSize: 'cover',
-                    backgroundPosition: 'center'
+                    backgroundPosition: 'center',
                   }}
                 >
-                  {!photoPreview && name.charAt(0).toUpperCase()}
+                  {!photo && name.charAt(0).toUpperCase()}
                 </div>
-                {photoPreview && (
+                {photo && (
                   <button
                     type="button"
-                    onClick={handleClearPhoto}
+                    onClick={() => setPhoto(null)}
+                    aria-label="Remove photo"
                     className="absolute -top-1 -right-1 w-6 h-6 bg-error rounded-full flex items-center justify-center text-xs"
                   >
                     ✕
@@ -204,7 +137,6 @@ function PlayerJoin() {
                 )}
               </div>
 
-              {/* Camera button only */}
               <div className="flex-1">
                 <button
                   type="button"
@@ -214,25 +146,22 @@ function PlayerJoin() {
                   📷 Take Photo
                 </button>
                 <p className="text-text-muted text-xs mt-2 text-center">
-                  {photoPreview ? 'Photo captured! Tap X to remove.' : 'Tap to take a selfie'}
+                  {photo ? 'Photo captured! Tap ✕ to remove.' : 'Tap to take a selfie'}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Join Button */}
           <button
             type="submit"
-            disabled={code.length !== 4 || !name.trim() || !isConnected || isJoining}
+            disabled={!canSubmit}
             className={`btn-primary w-full text-xl py-4 flex items-center justify-center gap-2 ${
-              code.length !== 4 || !name.trim() || !isConnected || isJoining
-                ? 'opacity-50 cursor-not-allowed'
-                : ''
+              !canSubmit ? 'opacity-50 cursor-not-allowed' : ''
             }`}
           >
-            {isJoining ? (
+            {joining ? (
               <>
-                <motion.div
+                <motion.span
                   animate={{ rotate: 360 }}
                   transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                   className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
@@ -255,11 +184,10 @@ function PlayerJoin() {
         </button>
       </motion.div>
 
-      {/* Camera Modal */}
       <CameraModal
         isOpen={showCamera}
         onClose={() => setShowCamera(false)}
-        onCapture={handleCameraCapture}
+        onCapture={setPhoto}
       />
     </div>
   )

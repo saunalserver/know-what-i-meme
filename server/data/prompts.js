@@ -303,6 +303,7 @@ export const PROMPTS = {
   ],
 };
 
+
 // Flatten all prompts into a single array, tagged by category
 const allPrompts = [];
 for (const [category, prompts] of Object.entries(PROMPTS)) {
@@ -311,38 +312,49 @@ for (const [category, prompts] of Object.entries(PROMPTS)) {
   }
 }
 
-// Get random prompts for voting (optionally filter by content level)
-export function getRandomPrompts(count = 3, includeEdgy = true) {
-  let pool = [...allPrompts];
+export const PROMPT_COUNT = allPrompts.length;
 
-  // Filter out edgy content if needed
-  if (!includeEdgy) {
-    pool = pool.filter(p => p.category !== 'edgy');
+// Unbiased shuffle. `array.sort(() => Math.random() - 0.5)` is not one: it
+// leaves the first entries far likelier to stay put, so the same handful of
+// prompts kept coming up.
+function shuffle(array) {
+  const out = [...array];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
   }
+  return out;
+}
 
-  // Shuffle and select
-  const shuffled = pool.sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count).map(p => p.text);
+/**
+ * Pick prompts to vote on.
+ *
+ * @param {number} count       how many options to offer
+ * @param {boolean} includeEdgy include the 'edgy' category
+ * @param {Set<string>} usedTexts prompts already seen this game, avoided if possible
+ */
+export function getRandomPrompts(count = 3, includeEdgy = true, usedTexts = new Set()) {
+  const pool = includeEdgy ? allPrompts : allPrompts.filter(p => p.category !== 'edgy');
+
+  const unused = pool.filter(p => !usedTexts.has(p.text));
+  // Only fall back to repeats once a very long game has exhausted the deck.
+  const source = unused.length >= count ? unused : pool;
+
+  return shuffle(source).slice(0, count).map(p => p.text);
 }
 
 // Replace player placeholders in a prompt
 export function fillPlayerPlaceholders(prompt, players) {
   if (!players || players.length < 1) return prompt;
 
-  // Get random players for placeholders
-  const shuffledPlayers = [...players].sort(() => Math.random() - 0.5);
-  const player1 = shuffledPlayers[0]?.name || 'Someone';
-  const player2 = shuffledPlayers[1]?.name || 'Someone Else';
+  const shuffled = shuffle(players);
+  const player1 = shuffled[0]?.name || 'Someone';
+  // With a single player, {Player2} must not repeat {Player}.
+  const player2 = shuffled[1]?.name || 'Someone Else';
 
   return prompt
     .replace(/{Player}/g, player1)
     .replace(/{Player2}/g, player2);
-}
-
-// Get a random prompt with player names filled in
-export function getRandomPromptWithPlayers(players, includeEdgy = true) {
-  const prompts = getRandomPrompts(1, includeEdgy);
-  return fillPlayerPlaceholders(prompts[0], players);
 }
 
 export default PROMPTS;

@@ -5,6 +5,12 @@ votes on whose was best. One screen for the room, one phone per player.
 
 Live at **https://saunalserver.xyz/kwim/**
 
+| **Host lobby** — code + QR, players join | **Prompt vote** — pick the round's prompt |
+|---|---|
+| ![Host lobby with room code, QR and player list](docs/img/lobby-players.png) | ![Phone view voting on a prompt](docs/img/vote.png) |
+| **GIF search** — find your answer | **The big screen** — synced live during rounds |
+| ![Phone view searching GIFs for the round prompt](docs/img/gif-search.png) | ![Host big-screen view during a round](docs/img/host-round.png) |
+
 ## 🎮 How to Play
 1. **Create a room** on the big screen and share the 4-letter code (or let players scan the QR).
 2. **Join** from any phone at `/kwim` — pick a name and take a selfie or choose an emoji.

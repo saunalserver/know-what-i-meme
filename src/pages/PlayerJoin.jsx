@@ -45,7 +45,7 @@ function PlayerJoin() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-dark-primary via-dark-secondary to-dark-tertiary"
+      className="min-h-screen flex flex-col items-center justify-center p-5"
       style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       {error && (
@@ -66,13 +66,13 @@ function PlayerJoin() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md"
       >
-        <h1 className="text-4xl font-bold text-white text-center mb-8">
+        <h1 className="text-4xl font-bold text-white text-center mb-6">
           <span className="text-accent">Join</span> a Game
         </h1>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="card space-y-5">
           <div>
-            <label htmlFor="room-code" className="block text-text-secondary mb-2 text-lg">
+            <label htmlFor="room-code" className="block text-text-secondary mb-2 text-sm uppercase tracking-widest">
               Room Code
             </label>
             <input
@@ -92,7 +92,7 @@ function PlayerJoin() {
           </div>
 
           <div>
-            <label htmlFor="player-name" className="block text-text-secondary mb-2 text-lg">
+            <label htmlFor="player-name" className="block text-text-secondary mb-2 text-sm uppercase tracking-widest">
               Your Name
             </label>
             <input
@@ -108,14 +108,14 @@ function PlayerJoin() {
           </div>
 
           <div>
-            <span className="block text-text-secondary mb-2 text-lg">
-              Profile Picture <span className="text-text-muted text-sm">(optional)</span>
+            <span className="block text-text-secondary mb-2 text-sm uppercase tracking-widest">
+              Photo <span className="text-text-muted normal-case tracking-normal">(optional)</span>
             </span>
 
             <div className="flex gap-3 items-start">
               <div className="relative">
                 <div
-                  className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold shrink-0 overflow-hidden border-2 border-dark-tertiary"
+                  className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold shrink-0 overflow-hidden border-2 border-line"
                   style={{
                     backgroundColor: PREVIEW_COLOR,
                     backgroundImage: photo ? `url(${photo})` : 'none',
@@ -178,7 +178,7 @@ function PlayerJoin() {
 
         <button
           onClick={() => navigate('/')}
-          className="mt-6 w-full text-text-secondary hover:text-white transition-colors"
+          className="mt-5 w-full py-2 text-text-secondary hover:text-white transition-colors"
         >
           ← Back to Home
         </button>

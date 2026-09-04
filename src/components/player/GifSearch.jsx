@@ -120,12 +120,12 @@ export function GifSearch({ onSelect, selectedGif }) {
             enterKeyHint="search"
             className="input w-full pr-16"
           />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
             {query && (
               <button
                 onClick={() => { setQuery(''); fetchTrending() }}
                 aria-label="Clear search"
-                className="p-1 text-text-muted hover:text-white transition-colors"
+                className="w-9 h-9 grid place-items-center rounded-lg text-text-muted hover:text-white hover:bg-white/5 transition-colors"
               >
                 ✕
               </button>
@@ -134,7 +134,7 @@ export function GifSearch({ onSelect, selectedGif }) {
               onClick={handleShuffle}
               aria-label="Show different GIFs"
               title="Shuffle"
-              className="p-1 text-text-muted hover:text-accent transition-colors"
+              className="w-9 h-9 grid place-items-center rounded-lg text-text-muted hover:text-accent hover:bg-white/5 transition-colors"
             >
               🎲
             </button>
@@ -144,21 +144,21 @@ export function GifSearch({ onSelect, selectedGif }) {
           onClick={() => searchGifs(query)}
           disabled={query.trim().length < MIN_QUERY_LENGTH || loading}
           aria-label="Search"
-          className="px-4 py-2 bg-accent text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
+          className="w-14 shrink-0 grid place-items-center bg-accent text-white rounded-xl text-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
         >
           {loading ? '⏳' : '🔍'}
         </button>
       </div>
 
-      <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+      <div className="flex gap-2 mb-3 overflow-x-auto pb-1 scroll-fade-x -mx-1 px-1">
         {categories.map(cat => (
           <button
             key={cat.id}
             onClick={() => handleCategoryClick(cat.id)}
-            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors ${
+            className={`px-3.5 py-2 rounded-full text-sm whitespace-nowrap border transition-colors ${
               activeCategory === cat.id
-                ? 'bg-accent text-white'
-                : 'bg-dark-tertiary text-text-secondary hover:bg-dark-secondary'
+                ? 'bg-accent border-accent text-white'
+                : 'bg-dark-elevated border-line text-text-secondary hover:bg-dark-tertiary'
             }`}
           >
             {cat.emoji} {cat.name}
@@ -174,27 +174,27 @@ export function GifSearch({ onSelect, selectedGif }) {
       )}
 
       {selectedGif && (
-        <div className="mb-3">
-          <p className="text-text-secondary text-sm mb-2">Selected:</p>
-          <div className="relative inline-block">
-            <img src={selectedGif} alt="Selected GIF" className="w-32 h-32 object-cover rounded-lg" />
-            <button
-              onClick={() => onSelect(null)}
-              aria-label="Deselect GIF"
-              className="absolute -top-2 -right-2 bg-error text-white w-6 h-6 rounded-full text-sm"
-            >
-              ✕
-            </button>
+        <div className="mb-3 flex items-center gap-3 bg-dark-secondary border border-accent/50 rounded-xl p-2">
+          <img src={selectedGif} alt="Selected GIF" className="w-16 h-16 object-cover rounded-lg shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-accent text-sm font-bold">Your pick</p>
+            <p className="text-text-muted text-xs">Tap another to change it</p>
           </div>
+          <button
+            onClick={() => onSelect(null)}
+            aria-label="Deselect GIF"
+            className="w-9 h-9 shrink-0 grid place-items-center rounded-lg bg-dark-tertiary text-text-secondary hover:text-error transition-colors"
+          >
+            ✕
+          </button>
         </div>
       )}
 
       {/* Safari needs the GPU hints below to scroll a grid of GIFs smoothly. */}
       <div
-        className="grid grid-cols-3 gap-1.5 flex-1 overflow-y-auto pr-1"
+        className="grid grid-cols-3 gap-2 flex-1 overflow-y-auto pr-1 content-start"
         style={{
           minHeight: '35vh',
-          maxHeight: '45vh',
           transform: 'translateZ(0)',
           WebkitOverflowScrolling: 'touch',
         }}
@@ -203,10 +203,13 @@ export function GifSearch({ onSelect, selectedGif }) {
           <button
             key={gif.id}
             onClick={() => handleSelect(gif)}
-            className={`rounded-lg overflow-hidden transition-transform active:scale-95 ${
-              selectedGif === gif.url ? 'ring-2 ring-accent' : ''
+            // The tile carries its own surface: a cell whose GIF has not
+            // arrived yet used to paint nothing at all, so a part-loaded grid
+            // read as holes punched in the layout rather than as loading.
+            className={`relative aspect-square rounded-xl overflow-hidden bg-dark-secondary transition-transform active:scale-95 ${
+              selectedGif === gif.url ? 'ring-[3px] ring-accent' : ''
             }`}
-            style={{ height: '100px', transform: 'translateZ(0)' }}
+            style={{ transform: 'translateZ(0)' }}
           >
             <img
               src={gif.preview || gif.url}
@@ -221,7 +224,7 @@ export function GifSearch({ onSelect, selectedGif }) {
         {/* Placeholders keep the grid from collapsing while a page loads */}
         {loading && gifs.length === 0 &&
           Array.from({ length: 9 }).map((_, i) => (
-            <div key={`skeleton-${i}`} className="rounded-lg bg-dark-secondary animate-pulse" style={{ height: '100px' }} />
+            <div key={`skeleton-${i}`} className="aspect-square rounded-xl bg-dark-secondary animate-pulse" />
           ))}
       </div>
 
@@ -234,7 +237,7 @@ export function GifSearch({ onSelect, selectedGif }) {
       {!loading && gifs.length > 0 && (
         <button
           onClick={handleShuffle}
-          className="w-full mt-2 py-2 text-sm text-text-muted hover:text-accent transition-colors"
+          className="w-full mt-2 py-2.5 text-sm text-text-muted hover:text-accent transition-colors shrink-0"
         >
           🎲 Show me different GIFs
         </button>

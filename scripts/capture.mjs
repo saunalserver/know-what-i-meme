@@ -24,20 +24,36 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // Klipy "previews" are 2-8MB GIFs each; a grid of them takes minutes to load,
 // which starves the phone screenshot. For the shot we swap in real first-frame
 // thumbnails instead: intercept, fetch once, shrink with ffmpeg, fulfill.
+let thumbSeq = 0
 function shrinkThumbnails(page) {
   return page.route(/static\.klipy\.com\//, async (route) => {
-    const thumb = '/tmp/kwim-thumb.jpg'
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Every in-flight request needs its own scratch files. The whole grid is
+    // fetched at once, and when they all shared one /tmp/kwim-thumb.gif they
+    // overwrote each other mid-ffmpeg, so tiles came back blank.
+    const id = thumbSeq++
+    const raw = `/tmp/kwim-thumb-${id}.gif`
+    const thumb = `/tmp/kwim-thumb-${id}.jpg`
+
+    let bytes = null
+    for (let attempt = 0; attempt < 3 && !bytes; attempt++) {
       try {
         const res = await fetch(route.request().url())
-        if (!res.ok) continue
-        const raw = '/tmp/kwim-thumb.gif'
-        writeFileSync(raw, Buffer.from(await res.arrayBuffer()))
-        execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-frames:v', '1', '-vf', 'scale=252:200', thumb])
-        return route.fulfill({ status: 200, contentType: 'image/jpeg', body: readFileSync(thumb) })
+        if (res.ok) bytes = Buffer.from(await res.arrayBuffer())
       } catch { /* slow 8MB fetches drop now and then; retry */ }
     }
-    await route.continue()
+    if (!bytes) return route.continue()
+
+    // Serve the original bytes if ffmpeg can't take a frame off this one.
+    // Falling through to route.continue() here meant the browser went back to
+    // the live 8MB GIF, which was still in flight at screenshot time — that is
+    // why the same few tiles were blank in the README shot on every run.
+    try {
+      writeFileSync(raw, bytes)
+      execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-frames:v', '1', '-vf', 'scale=252:200', thumb])
+      return route.fulfill({ status: 200, contentType: 'image/jpeg', body: readFileSync(thumb) })
+    } catch {
+      return route.fulfill({ status: 200, contentType: 'image/gif', body: bytes })
+    }
   })
 }
 
@@ -87,12 +103,20 @@ async function searchAndSubmit(phone, screenshotPath) {
     await page
       .waitForFunction(
         () => {
-          const imgs = [...document.querySelectorAll('.grid img')]
-          return imgs.length >= 9 && imgs.every((i) => i.complete && i.naturalWidth > 0)
+          // Only the tiles actually in shot. `every` over the whole grid could
+          // never be satisfied: everything below the fold is loading="lazy" and
+          // stays incomplete, so the wait always timed out and the screenshot
+          // was taken with holes in the grid.
+          const imgs = [...document.querySelectorAll('.grid img')].slice(0, 12)
+          return imgs.length >= 12 && imgs.every((i) => i.complete && i.naturalWidth > 0)
         },
-        { timeout: 45000 }
+        // waitForFunction is (fn, arg, options) — passing the options object in
+        // the second slot made it the *argument*, so this silently ran on the
+        // 30s default and the shot was taken while tiles were still blank.
+        null,
+        { timeout: 60000 }
       )
-      .catch(() => console.log('warn: thumbnails still loading, shooting anyway'))
+      .catch((e) => console.log('warn: thumbnails still loading, shooting anyway:', String(e).split('\n')[0]))
     await sleep(600)
     await page.screenshot({ path: screenshotPath })
   }
@@ -135,7 +159,7 @@ async function main() {
     await codeEl.waitFor()
     const code = (await codeEl.innerText()).trim()
     console.log('room code:', code)
-    await host.getByText('Scan to join').waitFor()
+    await host.getByText('Or scan').waitFor()
 
     // Phone 1 fills the join form (screenshot), joins; phone 2 follows.
     const p1 = await joinPhone(browser, code, 'Alex', 'celebration')
@@ -172,8 +196,8 @@ async function main() {
     mark('promptVoteShown')
     await sleep(800)
     await p1.page.screenshot({ path: join(IMG, 'phone-vote.png') })
-    await p1.page.locator('button:has-text("1️⃣")').click()
-    await p2.page.locator('button:has-text("1️⃣")').click()
+    await p1.page.locator('[data-prompt-index="0"]').click()
+    await p2.page.locator('[data-prompt-index="0"]').click()
 
     // GIF search.
     await p1.page.waitForSelector('input[aria-label="Search GIFs"]', { timeout: 15000 })

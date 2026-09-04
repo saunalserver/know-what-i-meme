@@ -1,10 +1,14 @@
 @import "tailwindcss";
 
-/* Custom theme colors */
 @theme {
+  /* Surfaces, from the page backdrop up. `elevated` and `line` were added so a
+     card sitting on a card still reads as two things. */
   --color-dark-primary: #1a1a2e;
   --color-dark-secondary: #16213e;
   --color-dark-tertiary: #0f3460;
+  --color-dark-elevated: #1e2a4a;
+  --color-line: #26325a;
+
   --color-accent: #7289da;
   --color-accent-hover: #5b6eae;
   --color-text-primary: #ffffff;
@@ -13,122 +17,194 @@
   --color-success: #43b581;
   --color-error: #f04747;
   --color-warning: #faa61a;
+
+  /* Type scale for the big screen. The host view is a 10-foot UI: read from a
+     couch, not a desk, so nothing on it may fall below ~28px at 1080p. Each
+     step is clamped so the same markup still looks right in a laptop window
+     (lower bound) and on a 4K TV (upper bound); the vw middle does the work.
+     At 1920px wide, 1vw = 19.2px. */
+  --text-tv-label: clamp(0.95rem, 1.15vw, 1.75rem); /*  ~22px @1080p */
+  --text-tv-body: clamp(1.05rem, 1.5vw, 2.25rem); /*  ~29px */
+  --text-tv-lg: clamp(1.3rem, 1.9vw, 2.75rem); /*  ~36px */
+  --text-tv-xl: clamp(1.65rem, 2.6vw, 3.75rem); /*  ~50px */
+  --text-tv-2xl: clamp(2.1rem, 3.6vw, 5rem); /*  ~69px */
+  --text-tv-3xl: clamp(2.75rem, 5.5vw, 7.5rem); /* ~105px, room code */
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* No universal reset here: Tailwind's preflight already does box-sizing and the
+   margin/padding zeroing inside @layer base. A copy written *outside* a layer
+   outranks every layered utility — unlayered CSS always beats layered CSS — and
+   silently killed every p-* and m-* in the app. See LESSONS.md. */
 
 body {
   /* System fonts only: a webfont download stalls the first paint, and this
      game is often played on a LAN with no internet at all. */
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  background-color: #1a1a2e;
   color: #ffffff;
   min-height: 100vh;
   -webkit-text-size-adjust: 100%;
+  /* Two low-opacity pools of colour stop the large empty areas of the host
+     screen from reading as a flat blue rectangle on a big panel. */
+  background-color: #1a1a2e;
+  background-image:
+    radial-gradient(ellipse 90% 60% at 15% 0%, rgba(114, 137, 218, 0.16), transparent 60%),
+    radial-gradient(ellipse 80% 55% at 85% 100%, rgba(15, 52, 96, 0.5), transparent 65%);
+  background-attachment: fixed;
 }
 
-/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #16213e;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #7289da;
+  background: #38446e;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #5b6eae;
+  background: #7289da;
 }
 
-/* Buttons */
-.btn-primary,
-.btn-secondary,
-.btn-success {
-  font-weight: 600;
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
-  color: white;
-  transition: background-color 200ms, transform 200ms, opacity 200ms;
+/* Keyboard focus stays visible everywhere; the game is also played on a laptop
+   with no mouse to hand. */
+:focus-visible {
+  outline: 3px solid #7289da;
+  outline-offset: 2px;
+  border-radius: 0.375rem;
 }
 
-.btn-primary { background-color: #7289da; }
-.btn-secondary { background-color: #16213e; }
-.btn-success { background-color: #43b581; }
+@layer components {
+  .btn-primary,
+  .btn-secondary,
+  .btn-success {
+    font-weight: 600;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    color: white;
+    transition: background-color 200ms, transform 200ms, opacity 200ms, box-shadow 200ms;
+  }
 
-.btn-primary:hover:not(:disabled) { background-color: #5b6eae; transform: scale(1.03); }
-.btn-secondary:hover:not(:disabled) { background-color: #0f3460; }
-.btn-success:hover:not(:disabled) { background-color: #3aa070; transform: scale(1.03); }
+  .btn-primary {
+    background-color: #7289da;
+    box-shadow: 0 6px 20px -6px rgba(114, 137, 218, 0.7);
+  }
+  .btn-secondary {
+    background-color: #1e2a4a;
+    box-shadow: 0 6px 20px -8px rgba(0, 0, 0, 0.6);
+  }
+  .btn-success {
+    background-color: #43b581;
+    box-shadow: 0 6px 20px -6px rgba(67, 181, 129, 0.6);
+  }
 
-.btn-primary:active:not(:disabled),
-.btn-secondary:active:not(:disabled),
-.btn-success:active:not(:disabled) { transform: scale(0.98); }
+  .btn-primary:hover:not(:disabled) {
+    background-color: #5b6eae;
+    transform: translateY(-2px);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background-color: #263457;
+    transform: translateY(-2px);
+  }
+  .btn-success:hover:not(:disabled) {
+    background-color: #3aa070;
+    transform: translateY(-2px);
+  }
 
-/* Card */
-.card {
-  background-color: #16213e;
-  border-radius: 0.75rem;
-  padding: 1.5rem;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-}
+  .btn-primary:active:not(:disabled),
+  .btn-secondary:active:not(:disabled),
+  .btn-success:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+  }
 
-/* Input */
-.input {
-  background-color: #0f3460;
-  color: white;
-  border: 2px solid #0f3460;
-  border-radius: 0.5rem;
-  /* 16px keeps iOS Safari from zooming in when the field is focused. */
-  font-size: 16px;
-  padding: 0.75rem 1rem;
-  outline: none;
-  transition: border-color 200ms;
-  width: 100%;
-}
+  /* Every raised surface. A hairline top edge catches the light so cards read
+     as lifted off the backdrop rather than as darker holes cut into it. */
+  .card {
+    background-color: #16213e;
+    border: 1px solid #26325a;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.55);
+  }
 
-.input:focus {
-  border-color: #7289da;
-}
+  .input {
+    background-color: #0f3460;
+    color: white;
+    border: 2px solid #26325a;
+    border-radius: 0.75rem;
+    /* 16px keeps iOS Safari from zooming in when the field is focused. */
+    font-size: 16px;
+    padding: 0.75rem 1rem;
+    outline: none;
+    transition: border-color 200ms, box-shadow 200ms;
+    width: 100%;
+  }
 
-/* Room code display */
-.room-code {
-  font-weight: 800;
-  letter-spacing: 0.25em;
-  text-indent: 0.25em; /* Offset the trailing letter-space so it stays centred */
-  text-shadow: 0 0 20px rgba(114, 137, 218, 0.5);
-}
+  .input::placeholder {
+    color: #72767d;
+  }
 
-/* Player avatar */
-.player-avatar {
-  width: 3rem;
-  height: 3rem;
-  border-radius: 9999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 700;
-  font-size: 1.125rem;
-  background-size: cover;
-  background-position: center;
-  flex-shrink: 0;
+  .input:focus {
+    border-color: #7289da;
+    box-shadow: 0 0 0 4px rgba(114, 137, 218, 0.18);
+  }
+
+  /* The field draws its own focus ring above, so the global :focus-visible
+     outline would stack a second ring around the first. */
+  .input:focus-visible {
+    outline: none;
+  }
+
+  /* The join code. Tracking this wide needs the trailing letter-space trimmed
+     back or the glyphs sit visibly left of centre in their box. */
+  .room-code {
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-indent: 0.18em;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 40px rgba(114, 137, 218, 0.45);
+  }
+
+  /* Shape and colour only. Width/height belong to the size class the Avatar
+     component passes in — setting them here would override every one of them. */
+  .player-avatar {
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    background-size: cover;
+    background-position: center;
+    flex-shrink: 0;
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
+  }
+
+  /* Horizontal padding wide enough to clear TV overscan, which eats roughly the
+     outer 5% of the picture on a lot of sets. ~86px at 1080p. */
+  .tv-safe {
+    padding-inline: clamp(1.5rem, 4.5vw, 5.5rem);
+  }
+
+  /* Fades the edge of a horizontally scrolling row so a cut-off chip reads as
+     "there is more" instead of as a clipping bug. */
+  .scroll-fade-x {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 1.25rem, #000 calc(100% - 2rem), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 1.25rem, #000 calc(100% - 2rem), transparent);
+  }
 }
 
 @keyframes glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(114, 137, 218, 0.3); }
-  50% { box-shadow: 0 0 40px rgba(114, 137, 218, 0.6); }
+  0%, 100% { box-shadow: 0 0 30px rgba(114, 137, 218, 0.25); }
+  50% { box-shadow: 0 0 60px rgba(114, 137, 218, 0.5); }
 }
 
 .animate-glow {
-  animation: glow 2s ease-in-out infinite;
+  animation: glow 3s ease-in-out infinite;
 }
 
 /* Respect a reduced-motion preference: the game is full of looping animation. */

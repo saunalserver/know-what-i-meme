@@ -5,9 +5,9 @@ votes on whose was best. One screen for the room, one phone per player.
 
 Live at **https://saunalserver.xyz/kwim/**
 
-| **Host lobby** — code + QR, players join | **Prompt vote** — pick the round's prompt |
+| **Joining is the demo** — phone on the right, big screen on the left, live | **Prompt vote** — pick the round's prompt |
 |---|---|
-| ![Host lobby with room code, QR and player list](docs/img/lobby-players.png) | ![Phone view voting on a prompt](docs/img/vote.png) |
+| ![A phone joins a room and the player appears on the host screen in real time](docs/img/join.gif) | ![Phone view voting on a prompt](docs/img/vote.png) |
 | **GIF search** — find your answer | **The big screen** — synced live during rounds |
 | ![Phone view searching GIFs for the round prompt](docs/img/gif-search.png) | ![Host big-screen view during a round](docs/img/host-round.png) |
 

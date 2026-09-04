@@ -1,13 +1,16 @@
 # Know What I Meme
 
 A real-time, Jackbox-style party game: everyone answers a ridiculous prompt with a GIF, then
-votes on whose was best. One screen for the room, one phone per player.
+votes on whose was best. One big screen for the room, one phone per player.
 
-Live at **https://saunalserver.xyz/kwim/**
+**Live at [saunalserver.xyz/kwim](https://saunalserver.xyz/kwim/)**
 
 ![One player hosts on the big screen; everyone else scans the QR, joins on their phones and pops up in the lobby live](docs/img/join.gif)
 
 ## The big screen (host)
+
+Designed for the TV: a room code you can read from the couch, memes full-screen, and a timer
+the whole room can see.
 
 | Lobby: code, QR, live players | Presenting the memes | Round results |
 |---|---|---|
@@ -18,6 +21,12 @@ Live at **https://saunalserver.xyz/kwim/**
 | Join with code and name | Vote on the prompt | Find your GIF |
 |---|---|---|
 | ![Phone join form with room code, name and optional selfie](docs/img/phone-join.png) | ![Phone view voting on the round prompt](docs/img/phone-vote.png) | ![Phone view searching GIFs for the round prompt](docs/img/phone-search.png) |
+
+## A round, start to finish
+
+Memes presented one by one, phones vote, then the reveal — who picked whose.
+
+![Memes presented on the TV, phones vote, then round results with scores](docs/img/gameplay.gif)
 
 ## How to Play
 1. **Create a room** on the big screen and share the 4-letter code (or let players scan the QR).
@@ -32,10 +41,12 @@ Live at **https://saunalserver.xyz/kwim/**
   screen *and* on every phone.
 - **Survives interruptions**: hosts and players auto-rejoin after a refresh, a dropped tunnel,
   or a locked phone. Mid-game disconnects keep the player's score and show a 📴 marker.
-- **Mobile-first**: the phone is the controller; no pinch-zoom traps, no iOS input zoom, and it
-  respects `prefers-reduced-motion`. Safari-specific layout and animation fixes throughout.
-- **Cached GIF search**: repeated searches are served from an in-process LRU, so a full game
-  costs a fraction of the API calls it used to.
+- **Mobile-first controller**: the phone is the controller — no pinch-zoom traps, no iOS input
+  zoom, and it respects `prefers-reduced-motion`. Safari-specific layout and animation fixes
+  throughout.
+- **Pick your pace**: 1–15 rounds per game; the final round is worth double.
+- **Cached GIF search**: repeated searches are served from an in-process LRU, and a local pool
+  keeps the round playable even if the GIF API goes away mid-game.
 - **Path-prefix friendly**: builds and runs under `/kwim/` behind a reverse proxy, or at the
   root for local play.
 
@@ -98,12 +109,12 @@ npm start               # everything on :3002
 | `npm run dev:all` | Both at once |
 | `npm run build` | Production client into `dist/` |
 | `npm start` | Serve the built app and the API from one process |
-| `npm test` | Vitest run (86 tests) |
+| `npm test` | Vitest run (111 tests) |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run test:coverage` | Coverage report for the server |
 | `npm run lint` | ESLint |
 | `npm run check` | Lint + tests: run this before committing |
-| `npm run capture` | Regenerate every README screenshot and `join.gif` (see `scripts/capture.mjs`) |
+| `npm run capture` | Regenerate every README screenshot and gif (see `scripts/capture.mjs`) |
 
 ## Deploying behind a reverse proxy
 The client is built with base `/kwim/`, and the API router is mounted at both `/` and `/kwim`,

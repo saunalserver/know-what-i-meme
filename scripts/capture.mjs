@@ -1,7 +1,13 @@
-// Captures the README assets: one TV recording of the join flow (docs/img/join.gif,
-// rendered from the recording with: ffmpeg -i <video> -t <promptVoteShown+2s> -vf
-// "fps=12,scale=1280:720:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse"
-// -loop 0 join.gif) plus TV and phone screenshots of every game phase.
+// Captures the README assets: one TV recording of a full round, cut into two gifs
+// (docs/img/join.gif — empty lobby to prompt vote; docs/img/gameplay.gif — meme
+// presentation, voting, results) plus TV and phone screenshots of every game phase.
+//
+// The gifs are cut with:
+//   ffmpeg -ss <start> -i <video> -vf "fps=10,scale=960:540:flags=lanczos,split[a][b];
+//          [a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=5"
+//          -loop 0 <out>
+// 960x540 @10fps: the memes on the TV are themselves full-motion GIFs, so higher
+// res/framerate explodes the file size (a 1280x720@12 cut ran to 15 MB).
 //
 // Run from the repo root while the production server is NOT needed:
 //   npm run capture
@@ -9,7 +15,7 @@
 // from .env), drives one host + two phones through a full round, then shuts down.
 import { chromium } from 'playwright'
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -57,9 +63,8 @@ function shrinkThumbnails(page) {
   })
 }
 
-// Wall-clock marks for every milestone, so the ffmpeg trim in scripts/gif.sh
-// can cut the hero GIF between "lobby visible" and "prompt appears" without
-// frame hunting.
+// Wall-clock marks for every milestone, so the ffmpeg cuts below can split the
+// recording at phase boundaries without frame hunting.
 const marks = { t0: Date.now() }
 const mark = (name) => {
   marks[name] = Date.now()
@@ -136,6 +141,17 @@ async function voteForOtherMeme(phone) {
     page.getByText('Vote submitted', { exact: false }).waitFor({ timeout: 8000 }),
     page.getByText('Round Complete').waitFor({ timeout: 8000 }),
   ]).catch(() => {})
+}
+
+const GIF_FILTER = 'fps=10,scale=960:540:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=5'
+
+// startSec 0 + durSec 0 = whole video.
+function cutGif(video, startSec, durSec, out) {
+  execFileSync('ffmpeg', [
+    '-y', '-v', 'error', '-ss', String(startSec), '-i', video,
+    ...(durSec ? ['-t', String(durSec)] : []),
+    '-vf', GIF_FILTER, '-loop', '0', out,
+  ])
 }
 
 async function main() {
@@ -231,7 +247,13 @@ async function main() {
     await hostCtx.close()
     mark('videoFlushed')
     writeFileSync(join(RAW, 'marks.json'), JSON.stringify(marks, null, 2))
-    console.log('done. video + marks in', RAW)
+
+    // Cut both README gifs off the recording: join runs from the top until the
+    // prompt vote appears; gameplay from just before the first meme to the end.
+    const video = join(RAW, readdirSync(RAW).find((f) => f.endsWith('.webm')))
+    cutGif(video, 0, (marks.promptVoteShown - marks.t0) / 1000 + 2, join(IMG, 'join.gif'))
+    cutGif(video, (marks.presentationShown - marks.t0) / 1000 - 0.5, 0, join(IMG, 'gameplay.gif'))
+    console.log('done. gifs in', IMG, '— video + marks in', RAW)
   } finally {
     await browser.close()
     srv.kill('SIGTERM')

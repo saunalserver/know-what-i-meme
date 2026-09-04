@@ -7,19 +7,19 @@ Live at **https://saunalserver.xyz/kwim/**
 
 ![One player hosts on the big screen; everyone else scans the QR, joins on their phones and pops up in the lobby live](docs/img/join.gif)
 
-## 🖥️ The big screen (host)
+## The big screen (host)
 
 | Lobby: code, QR, live players | Presenting the memes | Round results |
 |---|---|---|
 | ![Host lobby with room code, QR code and players joining live](docs/img/host-lobby.png) | ![Big screen presenting submitted memes one by one](docs/img/host-round.png) | ![Round results with scores and who voted for whom](docs/img/host-results.png) |
 
-## 📱 Your phone (player)
+## Your phone (player)
 
 | Join with code and name | Vote on the prompt | Find your GIF |
 |---|---|---|
 | ![Phone join form with room code, name and optional selfie](docs/img/phone-join.png) | ![Phone view voting on the round prompt](docs/img/phone-vote.png) | ![Phone view searching GIFs for the round prompt](docs/img/phone-search.png) |
 
-## 🎮 How to Play
+## How to Play
 1. **Create a room** on the big screen and share the 4-letter code (or let players scan the QR).
 2. **Join** from any phone at `/kwim` and pick a name; add a selfie or play as your initial.
 3. **Vote on the prompt** for the round from three options.
@@ -27,7 +27,7 @@ Live at **https://saunalserver.xyz/kwim/**
 5. **Vote for the best** submission. Voting is anonymous and you can't vote for your own.
 6. **Win** by racking up points across the rounds (the final round is worth double).
 
-## ✨ Features
+## Features
 - **Real-time**: Socket.io keeps every device in step; a shared countdown runs on the big
   screen *and* on every phone.
 - **Survives interruptions**: hosts and players auto-rejoin after a refresh, a dropped tunnel,
@@ -39,11 +39,11 @@ Live at **https://saunalserver.xyz/kwim/**
 - **Path-prefix friendly**: builds and runs under `/kwim/` behind a reverse proxy, or at the
   root for local play.
 
-## 🛠️ Tech Stack
+## Tech Stack
 React 19 · Vite 7 · Tailwind 4 · Framer Motion · Lucide · Express 5 · Socket.io 4 ·
 Klipy GIF API · Vitest
 
-## 🔑 API Keys & Configuration
+## API Keys & Configuration
 
 Copy `.env.example` to `.env` and fill in:
 
@@ -57,7 +57,7 @@ Copy `.env.example` to `.env` and fill in:
 > The phone camera used for profile pictures only works over HTTPS, so set it (with a reverse
 > proxy) if you want photos.
 
-## 🚀 Setup
+## Setup
 
 You need [Node.js](https://nodejs.org) 20+ and a (free) Klipy API key.
 
@@ -90,7 +90,7 @@ npm run build
 npm start               # everything on :3002
 ```
 
-## 🔧 Scripts
+## Scripts
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server (client) |
@@ -105,10 +105,10 @@ npm start               # everything on :3002
 | `npm run check` | Lint + tests: run this before committing |
 | `npm run capture` | Regenerate every README screenshot and `join.gif` (see `scripts/capture.mjs`) |
 
-## 🚢 Deploying behind a reverse proxy
+## Deploying behind a reverse proxy
 The client is built with base `/kwim/`, and the API router is mounted at both `/` and `/kwim`,
 so a proxy only needs to forward `/kwim*` and `/socket.io/*` to the app on the same origin.
 Socket.io connects to `/socket.io/`, not `/kwim/socket.io/`; give it its own rule.
 
-## 🛡️ License
+## License
 MIT

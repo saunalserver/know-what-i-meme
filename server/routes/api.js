@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { gifService } from '../services/gifService.js';
+import { gifCache } from '../services/gifCache.js';
 import { gameStore } from '../data/gameStore.js';
 
 // Clamp a user-supplied ?limit= to something the GIF API will accept.
@@ -18,9 +19,21 @@ function gifErrorStatus(error) {
   return 500;
 }
 
-function sendGifs(res, promise) {
+// GIFs served from the local pool come back as "local:<file>". Only the HTTP
+// layer knows what prefix it is mounted under, so it fills that in here --
+// '' at the root, '/kwim' behind the proxy.
+function withBaseUrl(gifs, baseUrl) {
+  const prefix = `${baseUrl}/api/gif/local/`;
+  return gifs.map(gif => (
+    typeof gif.url === 'string' && gif.url.startsWith('local:')
+      ? { ...gif, url: prefix + gif.url.slice(6), preview: prefix + gif.preview.slice(6) }
+      : gif
+  ));
+}
+
+function sendGifs(req, res, promise) {
   return promise
-    .then(gifs => res.json(gifs))
+    .then(gifs => res.json(withBaseUrl(gifs, req.baseUrl)))
     .catch(error => res.status(gifErrorStatus(error)).json({ error: error.message }));
 }
 
@@ -44,19 +57,19 @@ export function createApiRouter() {
       return res.status(400).json({ error: 'Query parameter "q" is required' });
     }
     const excludeIds = exclude ? String(exclude).split(',').filter(Boolean) : [];
-    sendGifs(res, gifService.search(String(q), parseLimit(req.query.limit), excludeIds));
+    sendGifs(req, res, gifService.search(String(q), parseLimit(req.query.limit), excludeIds));
   });
 
   router.get('/api/gif/trending', (req, res) => {
-    sendGifs(res, gifService.getTrending(parseLimit(req.query.limit), req.query.fresh === 'true'));
+    sendGifs(req, res, gifService.getTrending(parseLimit(req.query.limit), req.query.fresh === 'true'));
   });
 
   router.get('/api/gif/random', (req, res) => {
-    sendGifs(res, gifService.getRandom(parseLimit(req.query.limit)));
+    sendGifs(req, res, gifService.getRandom(parseLimit(req.query.limit)));
   });
 
   router.get('/api/gif/category/:categoryId', (req, res) => {
-    sendGifs(res, gifService.getByCategory(req.params.categoryId, parseLimit(req.query.limit)));
+    sendGifs(req, res, gifService.getByCategory(req.params.categoryId, parseLimit(req.query.limit)));
   });
 
   router.get('/api/gif/categories', (req, res) => {
@@ -65,6 +78,18 @@ export function createApiRouter() {
 
   router.get('/api/gif/emoji-map', (req, res) => {
     res.json(gifService.getEmojiMap());
+  });
+
+  // A GIF held in the local pool. Only files the pool knows about resolve, so
+  // a crafted name cannot reach anything else on disk.
+  router.get('/api/gif/local/:file', (req, res) => {
+    const filePath = gifCache.resolve(req.params.file);
+    if (!filePath) return res.status(404).json({ error: 'Not found' });
+    res.sendFile(filePath, {
+      headers: { 'Cache-Control': 'public, max-age=86400' },
+    }, error => {
+      if (error && !res.headersSent) res.status(404).end();
+    });
   });
 
   router.get('/api/gif/usage', (req, res) => {

@@ -26,8 +26,10 @@ Live at **https://saunalserver.xyz/kwim/**
   or a locked phone — mid-game disconnects keep the player's score and show a 📴 marker.
 - **Mobile-first**: the phone is the controller; no pinch-zoom traps, no iOS input zoom, and it
   respects `prefers-reduced-motion`. Safari-specific layout and animation fixes throughout.
-- **Cached GIF search**: repeated searches are served from an in-process LRU, so a full game
-  costs a fraction of the API calls it used to.
+- **Cached GIF search**: repeated searches come from an in-process LRU, and each search pulls
+  a term's whole 100-result catalogue in one call, so paging past the first screen is free.
+- **Optional offline pool**: keeps a local copy of every GIF a search returns, so a LAN party
+  survives the internet dropping out.
 - **Path-prefix friendly**: builds and runs under `/kwim/` behind a reverse proxy, or at the
   root for local play.
 
@@ -44,6 +46,8 @@ Copy `.env.example` to `.env` and fill in:
 | `KLIPY_API_KEY` | ✅ | GIF search during rounds | Free account at **https://klipy.com** → dashboard → API key |
 | `VITE_PUBLIC_URL` | — | Public address baked into the QR code / join link (e.g. `https://example.com/kwim`). Leave unset for LAN play — the host's own address is used. | Your own deployment URL |
 | `PORT` | — | Server port (default `3002`) | — |
+| `GIF_CACHE_DIR` | — | Turns on the local GIF pool (below). Unset = off, and nothing is ever downloaded. | A directory with room to spare |
+| `GIF_CACHE_MAX_GB` | — | How large that pool may grow (default `5`) | — |
 
 > `VITE_PUBLIC_URL` is baked in at build time — change it and you must `npm run build` again.
 > The phone camera used for profile pictures only works over HTTPS, so set it (with a reverse
@@ -81,6 +85,22 @@ npm run dev:all         # server on :3002, Vite frontend on :5173
 npm run build
 npm start               # everything on :3002
 ```
+
+## 💾 Local GIF pool (optional)
+
+Set `GIF_CACHE_DIR` and the server keeps its own copy of **every GIF a search
+returns** — not just the ones players pick. If the GIF API becomes unreachable
+mid-party, searches fall back to that pool and the game keeps going.
+
+- Off by default. With `GIF_CACHE_DIR` unset the whole path is inert: no
+  directory, no downloads, no fallback.
+- Downloads happen in the background, two at a time, so a round never waits.
+- Bounded by `GIF_CACHE_MAX_GB`; once full, the least recently seen GIFs are
+  evicted. Files nothing in the index claims are swept at startup, so the pool
+  cannot quietly grow a pile of unfindable leftovers.
+- Pooled GIFs are served back same-origin from `/api/gif/local/<file>`, and only
+  files the pool actually owns resolve.
+- `GET /api/gif/usage` reports its size, backlog and eviction count.
 
 ## 🔧 Scripts
 | Command | What it does |

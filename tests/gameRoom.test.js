@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { GameRoom, NO_GIF_PLACEHOLDER } from '../server/game/GameRoom.js';
+import { GameRoom, NO_GIF_PLACEHOLDER, isUsableGifUrl } from '../server/game/GameRoom.js';
 
 // Minimal stand-in for socket.io: records what would have been broadcast.
 function makeIo() {
@@ -179,9 +179,24 @@ describe('GameRoom - submissions and votes', () => {
     expect(room.submissions.get('p0')).toBe('https://example.com/b.gif');
   });
 
-  it('rejects anything that is not an http(s) URL', () => {
-    for (const bad of ['javascript:alert(1)', 'data:image/gif;base64,x', '', null, 42]) {
-      expect(room.submitGif('p0', bad)).toBe(false);
+  it('accepts a GIF served from this server\'s own local pool', () => {
+    // Offline fallback submissions are same-origin paths, not absolute URLs.
+    expect(room.submitGif('p0', '/kwim/api/gif/local/abc123.gif')).toBe(true);
+    expect(room.getPlayer('p0').currentGif).toBe('/kwim/api/gif/local/abc123.gif');
+    expect(isUsableGifUrl('/api/gif/local/abc123.gif')).toBe(true);
+  });
+
+  it('rejects anything that is neither an http(s) URL nor a pooled file', () => {
+    const bad = [
+      'javascript:alert(1)', 'data:image/gif;base64,x', '', null, 42,
+      '/etc/passwd',
+      '/api/gif/local/../../../etc/passwd',
+      '/api/gif/local/abc.gif/../../secret',
+      'api/gif/local/abc.gif',          // must be rooted
+      '//evil.example/api/gif/local/a.gif', // protocol-relative: off-origin
+    ];
+    for (const value of bad) {
+      expect(room.submitGif('p0', value)).toBe(false);
     }
     expect(room.getPlayer('p0').hasSubmitted).toBe(false);
   });

@@ -4,6 +4,8 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import { gifCache } from './gifCache.js';
+
 const KLIPY_BASE_URL = 'https://api.klipy.com/api/v1';
 
 // Klipy allows ~100 calls/min. During a round every player searches at once,
@@ -13,6 +15,18 @@ const SEARCH_CACHE_TTL = 5 * 60 * 1000;
 const SEARCH_CACHE_MAX = 200;
 const TRENDING_CACHE_TTL = 60 * 60 * 1000;
 const REQUEST_TIMEOUT = 8000;
+
+// A query's whole catalogue is 100 results, and asking for all of them costs
+// exactly one call -- the same call we used to spend on the first 50. Paging
+// past the first screen is then free.
+const SEARCH_PAGE_SIZE = 100;
+
+// Trending is ~66 full pages deep. Reading only page 1 meant every "random"
+// and every empty-search grid drew from the same 50 GIFs; a random page turns
+// that into a pool of thousands for the same one call.
+const TRENDING_PAGE_SIZE = 50;
+const TRENDING_MAX_PAGE = 66;
+const TRENDING_POOL_MAX = 300;
 
 const CATEGORIES = [
   { id: 'reactions', name: 'Reactions', emoji: '😏' },
@@ -27,6 +41,7 @@ const CATEGORIES = [
 const searchCache = new Map();
 let trendingCache = [];
 let trendingCacheTime = 0;
+const trendingPagesSeen = new Set();
 
 const stats = { apiCalls: 0, cacheHits: 0, errors: 0, startedAt: Date.now() };
 
@@ -107,17 +122,31 @@ export const gifService = {
   // Search GIFs, dropping any the caller has already been shown.
   async search(query, limit = 20, excludeIds = []) {
     const normalized = query.trim().toLowerCase();
-    // Fetch a bigger page than asked for so exclusions still leave a full grid.
-    const fetchCount = Math.min(limit + excludeIds.length, 50);
-    const cacheKey = `search:${normalized}:${fetchCount}`;
+    const cacheKey = `search:${normalized}`;
 
     let results = cacheGet(cacheKey);
     if (!results) {
-      results = await klipyFetch('/gifs/search', { q: normalized, per_page: fetchCount }, query);
+      try {
+        // Pull the full catalogue for the term, once, and slice it locally.
+        results = await klipyFetch(
+          '/gifs/search',
+          { q: normalized, per_page: SEARCH_PAGE_SIZE },
+          query,
+        );
+      } catch (error) {
+        // Klipy is unreachable: fall back to whatever the local pool holds.
+        const offline = gifCache.search(normalized, limit, excludeIds);
+        if (offline.length > 0) {
+          console.warn(`📴 Klipy unreachable, serving ${offline.length} local GIFs for "${normalized}"`);
+          return offline;
+        }
+        throw error;
+      }
       cacheSet(cacheKey, results);
+      gifCache.remember(normalized, results);
     }
 
-    const excluded = new Set(excludeIds);
+    const excluded = new Set(excludeIds.map(String));
     return results.filter(gif => !excluded.has(String(gif.id))).slice(0, limit);
   },
 
@@ -129,11 +158,26 @@ export const gifService = {
       return trendingCache.slice(0, limit);
     }
 
+    // Deliberately random: reading page 1 every time is why the same GIFs kept
+    // coming back. Prefer a page we have not pulled yet this run.
+    let page = 1 + Math.floor(Math.random() * TRENDING_MAX_PAGE);
+    for (let tries = 0; tries < 5 && trendingPagesSeen.has(page); tries++) {
+      page = 1 + Math.floor(Math.random() * TRENDING_MAX_PAGE);
+    }
+
     try {
-      // Always pull a deep page so shuffle and repeat requests have material.
-      const gifs = await klipyFetch('/gifs/trending', { per_page: 50 }, 'Trending');
+      const gifs = await klipyFetch(
+        '/gifs/trending',
+        { per_page: TRENDING_PAGE_SIZE, page },
+        'Trending',
+      );
       if (gifs.length > 0) {
-        trendingCache = gifs;
+        trendingPagesSeen.add(page);
+        gifCache.remember('trending', gifs);
+        // Accumulate across pages so shuffles get deeper the longer we run.
+        const merged = new Map(trendingCache.map(gif => [String(gif.id), gif]));
+        for (const gif of gifs) merged.set(String(gif.id), gif);
+        trendingCache = [...merged.values()].slice(-TRENDING_POOL_MAX);
         trendingCacheTime = now;
       }
       return gifs.slice(0, limit);
@@ -141,13 +185,20 @@ export const gifService = {
       console.error(`❌ Klipy trending failed: ${error.message}`);
       // Stale trending beats an empty grid mid-round.
       if (trendingCache.length > 0) return trendingCache.slice(0, limit);
+      const offline = gifCache.random(limit);
+      if (offline.length > 0) return offline;
       throw new Error('GIF service unavailable');
     }
   },
 
-  // Random = a shuffled slice of the (cached) trending pool, so it costs nothing.
+  // Random = a shuffled slice of the accumulated trending pool, which spans
+  // every page pulled so far, so it costs nothing and keeps getting deeper.
   async getRandom(limit = 20) {
-    const gifs = [...(await this.getTrending(50))];
+    if (trendingCache.length === 0) await this.getTrending(TRENDING_PAGE_SIZE);
+
+    const gifs = [...trendingCache];
+    if (gifs.length === 0) return gifCache.random(limit);
+
     for (let i = gifs.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [gifs[i], gifs[j]] = [gifs[j], gifs[i]];
@@ -176,7 +227,9 @@ export const gifService = {
       hitRate: total ? `${Math.round((stats.cacheHits / total) * 100)}%` : 'n/a',
       cachedQueries: searchCache.size,
       trendingCachedAt: trendingCacheTime ? new Date(trendingCacheTime).toISOString() : null,
+      trendingPagesSeen: trendingPagesSeen.size,
       uptimeMinutes: Math.round((Date.now() - stats.startedAt) / 60000),
+      localPool: gifCache.getStats(),
     };
   },
 
@@ -185,6 +238,7 @@ export const gifService = {
     searchCache.clear();
     trendingCache = [];
     trendingCacheTime = 0;
+    trendingPagesSeen.clear();
     stats.apiCalls = 0;
     stats.cacheHits = 0;
     stats.errors = 0;

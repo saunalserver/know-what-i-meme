@@ -17,6 +17,16 @@ export const NO_GIF_PLACEHOLDER =
 
 export const MAX_PLAYERS = 9;
 
+// A submission is either a remote GIF URL or one of this server's own pooled
+// files, which are served same-origin under whatever prefix the API is mounted
+// at (e.g. /kwim/api/gif/local/abc.gif).
+const LOCAL_GIF_PATH = /^\/(?:[A-Za-z0-9_-]+\/)*api\/gif\/local\/[A-Za-z0-9_-]+\.gif$/;
+
+export function isUsableGifUrl(value) {
+  return typeof value === 'string'
+    && (/^https?:\/\//i.test(value) || LOCAL_GIF_PATH.test(value));
+}
+
 export class GameRoom {
   constructor(code, hostId) {
     this.code = code;
@@ -355,7 +365,7 @@ export class GameRoom {
   submitGif(playerId, gifUrl) {
     const player = this.getPlayer(playerId);
     if (!player) return false;
-    if (typeof gifUrl !== 'string' || !/^https?:\/\//i.test(gifUrl)) return false;
+    if (!isUsableGifUrl(gifUrl)) return false;
 
     // Players may keep changing their pick until the timer runs out.
     player.currentGif = gifUrl;

@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import { setupSocketHandlers } from './server/socket/index.js';
 import { createApiRouter } from './server/routes/api.js';
 import { gameStore } from './server/data/gameStore.js';
+import { gifCache } from './server/services/gifCache.js';
 
 dotenv.config();
 
@@ -62,6 +63,10 @@ if (isProduction) {
 
 setupSocketHandlers(io);
 
+// Opt-in local GIF pool; a no-op unless GIF_CACHE_DIR is set. Never fatal --
+// a missing drive must not stop the game from starting.
+gifCache.init().catch(error => console.error(`❌ GIF pool init failed: ${error.message}`));
+
 httpServer.listen(PORT, HOST, () => {
   console.log(`🎮 Know What I Meme server running on port ${PORT}`);
   console.log(`📡 Socket.io ready (${isProduction ? 'production, /kwim prefix' : 'development'})`);
@@ -75,6 +80,7 @@ function shutdown(signal) {
   console.log(`👋 ${signal} received, shutting down`);
 
   gameStore.shutdown();
+  gifCache.shutdown().catch(() => {});
   io.close();
   httpServer.close(() => process.exit(0));
 

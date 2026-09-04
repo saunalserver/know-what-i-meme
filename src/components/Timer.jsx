@@ -17,7 +17,16 @@ function formatTime(s) {
   return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`
 }
 
-export function Timer({ seconds, total, phase, compact = false }) {
+/**
+ * The shared countdown.
+ *
+ * `variant` picks how it sits in its container:
+ *  - `pill`   — its own filled surface, for the host's big screen, where the
+ *               colour change at 10s and 5s has to be visible across a room.
+ *  - `inline` — no surface of its own, for the phone header, which is already
+ *               a card; a second filled box inside it just showed a seam.
+ */
+export function Timer({ seconds, total, phase, variant = 'pill', size = 'md' }) {
   const prevSecondsRef = useRef(seconds)
   const hasTime = typeof seconds === 'number'
 
@@ -44,44 +53,72 @@ export function Timer({ seconds, total, phase, compact = false }) {
   const isUrgent = seconds <= 10
   const isCritical = seconds <= 5
   const label = PHASE_LABELS[phase] || ''
+  const isPill = variant === 'pill'
+  const tv = size === 'tv'
+
+  // On a filled urgent pill the text has to flip to stay legible; inline, the
+  // surface never changes, so the numerals themselves carry the warning.
+  const digitColor = isPill
+    ? isCritical
+      ? 'text-white'
+      : isUrgent
+        ? 'text-black'
+        : 'text-accent'
+    : isCritical
+      ? 'text-error'
+      : isUrgent
+        ? 'text-warning'
+        : 'text-accent'
+
+  const labelColor = isPill && isCritical ? 'text-white/80' : isPill && isUrgent ? 'text-black/70' : 'text-text-secondary'
+  const trackColor = isPill && isUrgent ? 'bg-black/20' : 'bg-dark-tertiary'
+  const barColor = isPill
+    ? isCritical
+      ? 'bg-white'
+      : isUrgent
+        ? 'bg-black'
+        : 'bg-accent'
+    : isCritical
+      ? 'bg-error'
+      : isUrgent
+        ? 'bg-warning'
+        : 'bg-accent'
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -10 }}
+      initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`rounded-xl shadow-lg ${compact ? 'px-4 py-2' : 'px-6 py-3'} ${
-        isCritical ? 'bg-error' : isUrgent ? 'bg-yellow-500' : 'bg-dark-secondary'
-      }`}
+      className={
+        isPill
+          ? `flex items-center gap-4 rounded-full shadow-lg ${tv ? 'px-7 py-2.5' : 'px-5 py-2'} ${
+              isCritical ? 'bg-error' : isUrgent ? 'bg-warning' : 'bg-dark-elevated border border-line'
+            }`
+          : 'flex items-center gap-3'
+      }
     >
-      <div className="flex items-center gap-4">
-        <div className="text-center">
-          {label && (
-            <p className={`text-xs font-medium ${isCritical ? 'text-white' : 'text-text-secondary'}`}>
-              {label}
-            </p>
-          )}
-          <motion.p
-            key={seconds}
-            initial={{ scale: 1.15 }}
-            animate={{ scale: 1 }}
-            className={`${compact ? 'text-xl' : 'text-3xl'} font-bold tabular-nums ${
-              isCritical ? 'text-white' : isUrgent ? 'text-black' : 'text-accent'
-            }`}
-          >
-            {formatTime(seconds)}
-          </motion.p>
-        </div>
+      <div className={isPill ? 'text-center leading-tight' : 'text-right leading-tight'}>
+        {label && (
+          <p className={`${tv ? 'text-tv-label' : 'text-xs'} font-medium whitespace-nowrap ${labelColor}`}>
+            {label}
+          </p>
+        )}
+        <motion.p
+          key={seconds}
+          initial={{ scale: 1.12 }}
+          animate={{ scale: 1 }}
+          className={`${tv ? 'text-tv-lg' : 'text-xl'} font-bold tabular-nums leading-none ${digitColor}`}
+        >
+          {formatTime(seconds)}
+        </motion.p>
+      </div>
 
-        <div className={`${compact ? 'w-16' : 'w-24'} h-2 bg-dark-tertiary rounded-full overflow-hidden`}>
-          <motion.div
-            initial={false}
-            animate={{ width: `${percentage}%` }}
-            transition={{ duration: 0.5 }}
-            className={`h-full rounded-full ${
-              isCritical ? 'bg-white' : isUrgent ? 'bg-black' : 'bg-accent'
-            }`}
-          />
-        </div>
+      <div className={`${tv ? 'w-32' : 'w-16'} h-2 ${trackColor} rounded-full overflow-hidden shrink-0`}>
+        <motion.div
+          initial={false}
+          animate={{ width: `${percentage}%` }}
+          transition={{ duration: 0.5 }}
+          className={`h-full rounded-full ${barColor}`}
+        />
       </div>
     </motion.div>
   )

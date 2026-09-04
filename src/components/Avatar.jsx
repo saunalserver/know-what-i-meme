@@ -17,7 +17,10 @@ function Avatar({ player, size = 'md', showPulse = false, className = '' }) {
     '2xl': 'w-32 h-32 text-5xl',
   }
 
-  const baseClass = sizeClasses[size] || sizeClasses.md
+  // `size={null}` means the caller is sizing it themselves (the host screens
+  // scale avatars fluidly with the viewport). Falling back to a preset here
+  // would put a competing w-*/h-* in the same layer and win at random.
+  const baseClass = size === null ? '' : sizeClasses[size] || sizeClasses.md
 
   // Use photo only if it exists and hasn't errored
   const showPhoto = photo && !imageError

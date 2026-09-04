@@ -1,4 +1,4 @@
-import { Player } from './Player.js';
+import { Player, pickAvatarColor } from './Player.js';
 import { getRandomPrompts, fillPlayerPlaceholders } from '../data/prompts.js';
 
 // Fisher-Yates shuffle
@@ -234,7 +234,12 @@ export class GameRoom {
   }
 
   addPlayer(playerId, playerName, photo = null) {
-    const player = new Player(playerId, playerName, photo);
+    const player = new Player(
+      playerId,
+      playerName,
+      photo,
+      pickAvatarColor(Array.from(this.players.values(), (p) => p.color))
+    );
     this.players.push(player);
     this.touch();
     return player;

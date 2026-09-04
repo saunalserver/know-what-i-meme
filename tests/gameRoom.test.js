@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { GameRoom, NO_GIF_PLACEHOLDER, isUsableGifUrl } from '../server/game/GameRoom.js';
+import { pickAvatarColor } from '../server/game/Player.js';
 
 // Minimal stand-in for socket.io: records what would have been broadcast.
 function makeIo() {
@@ -410,5 +411,28 @@ describe('GameRoom - lifecycle', () => {
     // Player state the UI reads must survive serialisation.
     expect(json.players[0]).toHaveProperty('promptVote');
     expect(json.players[0]).toHaveProperty('connected');
+  });
+});
+
+describe('avatar colours', () => {
+  it('gives every player in a full room a different colour', () => {
+    const room = new GameRoom('COLR', 'host');
+    for (let i = 0; i < 9; i++) room.addPlayer(`p${i}`, `Player${i}`);
+
+    const colors = room.players.map((p) => p.color);
+    expect(new Set(colors).size).toBe(colors.length);
+  });
+
+  it('skips colours already taken', () => {
+    const first = pickAvatarColor([]);
+    expect(pickAvatarColor([first])).not.toBe(first);
+  });
+
+  it('still returns a colour once every one is taken', () => {
+    const room = new GameRoom('COLR', 'host');
+    for (let i = 0; i < 9; i++) room.addPlayer(`p${i}`, `Player${i}`);
+    const taken = room.players.map((p) => p.color);
+
+    expect(typeof pickAvatarColor([...taken, ...taken])).toBe('string');
   });
 });

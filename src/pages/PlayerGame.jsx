@@ -109,17 +109,17 @@ function PlayerGame() {
 
       {/* Header: who you are, the round, and — new here — the same countdown
           the big screen shows, so phones aren't guessing how long is left. */}
-      <header className="bg-dark-secondary rounded-xl p-3 mb-3 mx-4 mt-4 flex items-center justify-between gap-3">
+      <header className="card !rounded-2xl !p-3 mb-3 mx-4 mt-4 flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <Avatar player={myPlayer} size="sm" className="w-10 h-10 text-base" />
+          <Avatar player={myPlayer} size={null} className="w-10 h-10 text-base" />
           <div className="min-w-0">
-            <p className="font-bold text-white truncate">{myPlayer.name}</p>
-            <p className="text-sm text-text-secondary">{myPlayer.score} points</p>
+            <p className="font-bold text-white truncate leading-tight">{myPlayer.name}</p>
+            <p className="text-sm text-text-secondary leading-tight">{myPlayer.score} points</p>
           </div>
         </div>
 
         {timer ? (
-          <Timer seconds={timer.seconds} total={timer.total} phase={timer.phase} compact />
+          <Timer seconds={timer.seconds} total={timer.total} phase={timer.phase} variant="inline" />
         ) : (
           <div className="text-right">
             <p className="text-sm text-text-secondary">Round</p>
@@ -130,29 +130,50 @@ function PlayerGame() {
         )}
       </header>
 
-      <main className="flex-1 flex flex-col mx-4 pb-4">
+      <main className="flex-1 min-h-0 flex flex-col mx-4 pb-4">
         <AnimatePresence mode="wait">
           {/* PROMPT VOTE */}
           {phase === 'prompt_vote' && (
-            <motion.div key="prompt-vote" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <h2 className="text-xl font-bold text-white mb-4">Vote for a Prompt</h2>
+            <motion.div
+              key="prompt-vote"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="flex-1 min-h-0 flex flex-col"
+            >
+              <h2 className="text-xl font-bold text-white mb-1">Vote for a Prompt</h2>
+              <p className="text-sm text-text-muted mb-3">The room plays the winner</p>
 
-              <div className="space-y-3">
+              {/* The options share the space going spare so they are big thumb
+                  targets, but the growth is capped: uncapped, a one-line prompt
+                  got a 350px-tall card with its text marooned in the middle. */}
+              <div className="flex-1 min-h-0 flex flex-col justify-center gap-3 overflow-y-auto">
                 {gameState.currentPromptOptions.map((prompt, index) => (
                   <button
                     key={index}
                     onClick={() => handlePromptVote(index)}
-                    className={`w-full text-left p-4 rounded-xl transition-all ${
+                    // Stable hook for scripts/capture.mjs, which used to click
+                    // the keycap emoji that used to be the option number.
+                    data-prompt-index={index}
+                    className={`w-full flex-1 min-h-[5.5rem] max-h-[10.5rem] text-left p-4 rounded-2xl border transition-all active:scale-[0.98] ${
                       myPlayer.promptVote === index
-                        ? 'bg-accent text-white ring-2 ring-white/40'
-                        : 'bg-dark-secondary hover:bg-dark-tertiary'
+                        ? 'bg-accent border-accent text-white shadow-lg shadow-accent/25'
+                        : 'bg-dark-secondary border-line hover:bg-dark-elevated'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">{['1️⃣', '2️⃣', '3️⃣'][index]}</span>
-                      <span className="text-lg flex-1">{prompt}</span>
+                    <div className="flex items-center gap-3 h-full">
+                      <span
+                        className={`shrink-0 grid place-items-center w-9 h-9 rounded-xl font-bold tabular-nums ${
+                          myPlayer.promptVote === index
+                            ? 'bg-white/20 text-white'
+                            : 'bg-dark-tertiary text-accent'
+                        }`}
+                      >
+                        {index + 1}
+                      </span>
+                      <span className="text-lg flex-1 leading-snug">{prompt}</span>
                       {gameState.promptVoteCounts?.[index] > 0 && (
-                        <span className="text-sm font-bold opacity-70 tabular-nums">
+                        <span className="text-sm font-bold opacity-70 tabular-nums shrink-0">
                           {gameState.promptVoteCounts[index]}
                         </span>
                       )}
@@ -161,9 +182,9 @@ function PlayerGame() {
                 ))}
               </div>
 
-              <p className="text-center text-text-secondary mt-4">
+              <p className="text-center text-text-secondary mt-4 shrink-0">
                 {myPlayer.promptVote !== null
-                  ? '✓ Vote submitted! Tap again to change.'
+                  ? '✓ Vote submitted — tap another to change'
                   : 'Tap to vote for your favourite prompt'}
               </p>
             </motion.div>
@@ -176,7 +197,7 @@ function PlayerGame() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="flex flex-col flex-1 pb-24"
+              className="flex-1 min-h-0 flex flex-col pb-24"
             >
               <div className="bg-dark-secondary rounded-xl p-3 mb-2">
                 <p className="text-lg font-bold text-white">&ldquo;{gameState.currentPrompt}&rdquo;</p>
@@ -223,10 +244,21 @@ function PlayerGame() {
 
           {/* PRESENTATION */}
           {phase === 'presentation' && (
-            <motion.div key="presentation" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-12">
-              <div className="text-6xl mb-4">👀</div>
-              <h2 className="text-2xl font-bold text-white mb-2">Watch the Big Screen!</h2>
-              <p className="text-text-secondary">
+            <motion.div
+              key="presentation"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex-1 flex flex-col items-center justify-center text-center"
+            >
+              <motion.div
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 2.4, repeat: Infinity }}
+                className="text-7xl mb-6"
+              >
+                👀
+              </motion.div>
+              <h2 className="text-3xl font-bold text-white mb-2">Watch the Big Screen</h2>
+              <p className="text-text-secondary text-lg tabular-nums">
                 Meme {Math.min(gameState.presentationIndex + 1, order.length)} of {order.length}
               </p>
             </motion.div>
@@ -234,12 +266,18 @@ function PlayerGame() {
 
           {/* VOTING */}
           {phase === 'voting' && (
-            <motion.div key="voting" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <h2 className="text-xl font-bold text-white mb-2">Vote for the Best Meme!</h2>
-              <p className="text-text-secondary mb-1">&ldquo;{gameState.currentPrompt}&rdquo;</p>
-              <p className="text-text-muted text-sm mb-4">Memes stay anonymous until voting ends</p>
+            <motion.div
+              key="voting"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="flex-1 min-h-0 flex flex-col"
+            >
+              <h2 className="text-xl font-bold text-white mb-1">Vote for the Best Meme!</h2>
+              <p className="text-text-secondary mb-1 leading-snug">&ldquo;{gameState.currentPrompt}&rdquo;</p>
+              <p className="text-text-muted text-sm mb-3">Memes stay anonymous until voting ends</p>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 flex-1 min-h-0 overflow-y-auto content-start">
                 {order.map((playerId, index) => {
                   const p = gameState.players.find(pl => pl.id === playerId)
                   if (!p || p.id === player.id) return null // Can't vote for yourself
@@ -253,8 +291,8 @@ function PlayerGame() {
                       }`}
                     >
                       <div className="relative">
-                        <img src={p.currentGif} alt={`Meme ${index + 1}`} className="w-full h-32 object-cover" />
-                        <div className="absolute top-2 left-2 bg-dark-primary/80 px-2 py-1 rounded text-sm font-bold">
+                        <img src={p.currentGif} alt={`Meme ${index + 1}`} className="w-full h-40 object-cover" />
+                        <div className="absolute top-2 left-2 bg-dark-primary/85 backdrop-blur px-2.5 py-1 rounded-lg text-sm font-bold tabular-nums">
                           #{index + 1}
                         </div>
                         {isSelected && (
@@ -268,29 +306,39 @@ function PlayerGame() {
                 })}
               </div>
 
-              <p className="text-center text-text-secondary mt-4">
-                {myPlayer.hasVoted ? '✓ Vote submitted! Tap another to change.' : 'Tap to vote for the best meme'}
+              <p className="text-center text-text-secondary mt-3 shrink-0">
+                {myPlayer.hasVoted ? '✓ Vote submitted — tap another to change' : 'Tap to vote for the best meme'}
               </p>
             </motion.div>
           )}
 
           {/* ROUND RESULTS */}
           {phase === 'round_results' && (
-            <motion.div key="round-results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-8">
-              <div className="text-5xl mb-4">🎉</div>
-              <h2 className="text-2xl font-bold text-white mb-2">Round Complete!</h2>
-              <p className="text-text-secondary">Check the big screen for results</p>
+            <motion.div
+              key="round-results"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex-1 flex flex-col items-center justify-center text-center"
+            >
+              <div className="text-6xl mb-4">🎉</div>
+              <h2 className="text-3xl font-bold text-white mb-2">Round Complete!</h2>
+              <p className="text-text-secondary mb-8">Check the big screen for results</p>
 
-              <div className="mt-6 bg-dark-secondary rounded-xl p-4">
-                <p className="text-sm text-text-secondary">Your Score</p>
-                <p className="text-4xl font-bold text-accent">{myPlayer.score}</p>
+              <div className="card w-full">
+                <p className="text-sm text-text-secondary uppercase tracking-widest mb-1">Your Score</p>
+                <p className="text-6xl font-bold text-accent tabular-nums leading-none">{myPlayer.score}</p>
               </div>
             </motion.div>
           )}
 
           {/* LEADERBOARD */}
           {phase === 'leaderboard' && (
-            <motion.div key="leaderboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="py-6">
+            <motion.div
+              key="leaderboard"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex-1 flex flex-col justify-center"
+            >
               <h2 className="text-2xl font-bold text-white mb-1 text-center">📊 Standings</h2>
               <p className="text-text-secondary text-center mb-6">
                 Round {gameState.currentRound} of {gameState.totalRounds}
@@ -303,8 +351,10 @@ function PlayerGame() {
                     initial={{ opacity: 0, x: -30 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.1 }}
-                    className={`flex items-center gap-3 p-3 rounded-xl ${
-                      p.id === player.id ? 'bg-accent/20 ring-2 ring-accent' : 'bg-dark-secondary'
+                    className={`flex items-center gap-3 p-3 rounded-xl border ${
+                      p.id === player.id
+                        ? 'bg-accent/20 border-accent'
+                        : 'bg-dark-secondary border-line'
                     }`}
                   >
                     <span className="text-lg font-bold w-6">
@@ -314,7 +364,7 @@ function PlayerGame() {
                     <span className={`flex-1 font-medium ${p.id === player.id ? 'text-white' : 'text-text-secondary'}`}>
                       {p.name} {p.id === player.id && '(You)'}
                     </span>
-                    <span className="font-bold text-accent">{p.score}</span>
+                    <span className="font-bold text-accent tabular-nums">{p.score}</span>
                   </motion.div>
                 ))}
               </div>
@@ -325,20 +375,25 @@ function PlayerGame() {
 
           {/* FINAL RESULTS */}
           {phase === 'final_results' && (
-            <motion.div key="final-results" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-8">
-              <div className="text-5xl mb-4">🏆</div>
-              <h2 className="text-2xl font-bold text-white mb-4">Game Over!</h2>
+            <motion.div
+              key="final-results"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex-1 flex flex-col items-center justify-center text-center"
+            >
+              <div className="text-6xl mb-4">🏆</div>
+              <h2 className="text-3xl font-bold text-white mb-6">Game Over!</h2>
 
-              <div className="bg-dark-secondary rounded-xl p-6 mb-4">
-                <p className="text-text-secondary mb-2">Final Score</p>
-                <p className="text-5xl font-bold text-accent">{myPlayer.score}</p>
-                <p className="text-text-secondary mt-1">points</p>
+              <div className="card w-full mb-4">
+                <p className="text-sm text-text-secondary uppercase tracking-widest mb-1">Final Score</p>
+                <p className="text-6xl font-bold text-accent tabular-nums leading-none">{myPlayer.score}</p>
+                <p className="text-text-secondary mt-2">points</p>
               </div>
 
               <p className="text-text-secondary">Check the big screen for the winner!</p>
 
-              <div className="mt-6 p-4 bg-dark-secondary rounded-xl">
-                <p className="text-text-secondary text-sm">Waiting for the host to start a new game...</p>
+              <div className="mt-6 px-4 py-3 bg-dark-secondary border border-line rounded-xl">
+                <p className="text-text-secondary text-sm">Waiting for the host to start a new game…</p>
               </div>
             </motion.div>
           )}
